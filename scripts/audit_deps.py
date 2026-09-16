@@ -42,6 +42,16 @@ STDLIB = set(sys.stdlib_module_names)
 THIRD_PARTY_ALIAS = {"chromadb", "jieba", "httpx", "fastapi", "uvicorn", "langgraph", "langchain_core"}
 
 
+
+# force-utf8 shim：Windows 控制台默认代码页（CI 里是 cp1252）无法编码 ✓ 等字符，会让"打印"把命令打挂。
+for _stream in (sys.stdout, sys.stderr):
+    _reconfigure = getattr(_stream, "reconfigure", None)
+    if _reconfigure is not None:
+        try:
+            _reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 def _module_files() -> list[Path]:
     return sorted(p for p in SRC.rglob("*.py") if "__pycache__" not in p.parts)
 

@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import re
 import sqlite3
+import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -40,6 +41,16 @@ CREDENTIAL_PATTERNS = [
 PLACEHOLDER_PATTERN = re.compile(r"(placeholder|test|fake|dummy|example|xxx|not-a-real)", re.IGNORECASE)
 SHORT_SECRET_SHAPE = re.compile(r"sk-[A-Za-z0-9]{6,}")
 
+
+
+# force-utf8 shim：Windows 控制台默认代码页（CI 里是 cp1252）无法编码 ✓ 等字符，会让"打印"把命令打挂。
+for _stream in (sys.stdout, sys.stderr):
+    _reconfigure = getattr(_stream, "reconfigure", None)
+    if _reconfigure is not None:
+        try:
+            _reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
 
 def iter_files(base: Path):
     for path in base.rglob("*"):

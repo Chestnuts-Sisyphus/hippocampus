@@ -22,6 +22,7 @@ import sys
 from pathlib import Path
 
 from hippocampus import __version__
+from hippocampus.console import force_utf8
 from hippocampus.core import MemoryCore, Scope
 from hippocampus.memory import account as account_mod
 from hippocampus.memory import config as mem_config
@@ -356,6 +357,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    force_utf8()  # Windows 控制台默认非 UTF-8：不兜底就会因为打印中文/符号崩掉
     parser = build_parser()
     args = parser.parse_args(argv if argv is not None else sys.argv[1:])
     try:

@@ -35,6 +35,16 @@ PII_PATTERNS = [
 IGNORE_VALUES = {"[]", "{}", "", "active", "fact", "preference", "resource", "status"}
 
 
+
+# force-utf8 shim：Windows 控制台默认代码页（CI 里是 cp1252）无法编码 ✓ 等字符，会让"打印"把命令打挂。
+for _stream in (sys.stdout, sys.stderr):
+    _reconfigure = getattr(_stream, "reconfigure", None)
+    if _reconfigure is not None:
+        try:
+            _reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 def seed_contents() -> set[str]:
     from hippocampus.seed import SEED_ITEMS
 

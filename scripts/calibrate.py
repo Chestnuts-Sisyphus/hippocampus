@@ -50,6 +50,16 @@ NEGATIVE: list[str] = [
 ]
 
 
+
+# force-utf8 shim：Windows 控制台默认代码页（CI 里是 cp1252）无法编码 ✓ 等字符，会让"打印"把命令打挂。
+for _stream in (sys.stdout, sys.stderr):
+    _reconfigure = getattr(_stream, "reconfigure", None)
+    if _reconfigure is not None:
+        try:
+            _reconfigure(encoding="utf-8", errors="replace")
+        except Exception:
+            pass
+
 def _top_score(core: MemoryCore, account: str, query: str) -> tuple[float, list[str]]:
     """每条查询用**独立会话**：会话实体兜底（session_entity_fallback）会把同会话
     前几轮的实体带进来，混在一起就测不出"这条查询本身命中多少"。"""

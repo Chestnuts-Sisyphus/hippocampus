@@ -9,7 +9,7 @@
 
 from __future__ import annotations
 
-from hippocampus.core import MemoryCore, Scope
+from hippocampus.core import Scope
 
 
 def test_update_writes_new_and_supersedes_old(core, scope):

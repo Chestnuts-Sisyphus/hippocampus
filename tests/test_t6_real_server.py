@@ -16,7 +16,6 @@ import time
 import httpx
 import pytest
 
-from hippocampus.core import MemoryCore, Scope
 from hippocampus.proxy.app import build_app
 from hippocampus.seed import seed
 
