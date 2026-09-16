@@ -19,11 +19,20 @@ Hippocampus 把"记忆"做成 agent 的核心能力，而不是外挂的检索�
 ## 快速开始
 
 ```bash
-pip install hippocampus-agent          # 或 pip install "hippocampus-agent[vector,proxy]"
+# 安装（三选一；尚未发布 PyPI，所以前两条是现在能用的路径）
+pip install "hippocampus-agent[vector,proxy] @ git+https://github.com/<owner>/hippocampus-agent"
+#   或：把源码目录拷到本机后  pip install -e "/path/to/hippocampus-agent[vector,proxy]"
+#   或（不装，只跑）：          PYTHONPATH=/path/to/hippocampus-agent/src python -m hippocampus.cli doctor
+
 hippocampus doctor                     # 体检：数据根／端口／锁／索引／嵌入档
 hippocampus seed                       # 灌入示例数据（含已知真值：事实／冲突对／过期项）
 hippocampus demo --memories            # 一键跑评测题 + 记忆开/关对照
 ```
+
+> 两条路径都实测过：**无 git 环境**（把源码树拷过去 + `pip install --offline -e .`）
+> 与**无网**（不装 `[vector]`：语义通道降级、其余通道照常，`doctor` 会明说）。
+> 只装核心（不带 `[vector]`）时检索走词法通道，功能不丢、召回弱一些——
+> 这条降级路径在 CI 里是一个独立任务（`core-only`）。
 
 `demo` 的实测输出（本机 2026-09-17，离线档、无凭据、示例数据）：
 
