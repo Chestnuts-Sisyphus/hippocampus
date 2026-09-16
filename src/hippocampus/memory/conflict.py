@@ -169,20 +169,33 @@ def is_same_subject_value_change(old: str, new: str) -> bool:
 
 
 def detect_rule_conflicts(
-    conn: sqlite3.Connection, content: str, mtype: str, *, limit: int = 20
+    conn: sqlite3.Connection,
+    content: str,
+    mtype: str,
+    *,
+    also_types: tuple[str, ...] = (),
+    limit: int = 20,
 ) -> list[tuple[str, str, str]]:
     """规则冲突检测，返回 [(旧记忆 id, 占位 '', 理由)]（新条尚未入库，故用空串占位）。
 
-    只看同类型、active、正式轨（shadow=0）的记忆，最多比 limit 条（按最近写入优先）。
+    比对面：`type` 命中 `mtype` **或** `also_types`（默认空）、active、正式轨（shadow=0），
+    按最近写入优先，最多 limit 条。
+
+    为什么要能跨类型比：同一件事在两条轨上的标注可能不同——"我的期望城市是北京"可能被
+    抽成 preference，而"我的期望城市是南京"被抽成 fact；只看同类型就会漏掉真正的改口。
+    调用方通常传 `also_types=("preference", "fact")`（陈述类互相可比），
+    `resource`／`status` 属操作性信息，不参与。
     """
     if not content:
         return []
+    types = [mtype, *[t for t in also_types if t != mtype]]
+    placeholders = ",".join("?" * len(types))
     try:
         rows = conn.execute(
             "SELECT id, content FROM memories "
-            "WHERE type=? AND status='active' AND COALESCE(shadow,0)=0 "
+            f"WHERE type IN ({placeholders}) AND status='active' AND COALESCE(shadow,0)=0 "
             "ORDER BY created_at DESC LIMIT ?",
-            (mtype, int(limit)),
+            (*types, int(limit)),
         ).fetchall()
     except sqlite3.Error:
         return []

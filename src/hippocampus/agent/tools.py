@@ -262,7 +262,7 @@ class ToolBox:
         }
 
     def _remember(self, content: str, kind: str = "preference") -> dict[str, Any]:
-        result = self.core.write(self.scope, content, kind=kind, source_quote="agent 工具写入")
+        result = self.core.write(self.scope, content, kind=kind, source_quote="agent 工具写入", explicit=True)
         return {
             "ids": result.ids,
             "superseded": result.superseded,

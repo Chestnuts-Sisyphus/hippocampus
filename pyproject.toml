@@ -48,7 +48,9 @@ dev = ["pytest>=8.0", "ruff>=0.6"]
 hippocampus = "hippocampus.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/hippocampus-agent/hippocampus-agent"
+Homepage = "https://github.com/Chestnuts-Sisyphus/hippocampus-agent"
+Repository = "https://github.com/Chestnuts-Sisyphus/hippocampus-agent"
+Issues = "https://github.com/Chestnuts-Sisyphus/hippocampus-agent/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hippocampus"]

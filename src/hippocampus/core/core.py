@@ -202,11 +202,15 @@ class MemoryCore:
         entities: list[str] | None = None,
         source: str | None = None,
         episode_id: str | None = None,
+        explicit: bool = False,
     ) -> WriteResult:
         """写入一条记忆（**不经模型抽取**，用于显式写入与工具结果固化）。
 
         - `kind`：preference／fact／resource／status。
         - `source`：覆盖 scope.source（user／model／tool）。`model` 轨写入 `shadow=1`（永不注入）。
+        - `explicit`：**调用方已表达确定意图**（用户直接编辑、或显式"记住 X"）→ 跳过
+          "冲突挂起确认"这一步，直接写入；冲突挂起是给**对话里冒出来的**新说法用的
+          （那时才需要人确认"你是不是改主意了"）。
         - 安全：内容过五组守卫；PII（E 组）直接丢弃并记入 `skipped`。
         - 去重：完全重复 → 跳过；语义命中 → 按 P1 分流（supersede／放行／挂起确认），**绝不静默丢弃**。
         """
@@ -281,9 +285,10 @@ class MemoryCore:
                         supersede_old = sem
                     elif action == "admit":
                         pass
-                    else:
+                    elif not explicit:
                         # P1 修复：机械判据拿不准时**不丢**——新条以 candidate 入库并挂起确认，
                         # 旧值在人工裁决前保持生效（A29 / A24）。
+                        # explicit=True（用户直接编辑）不在此列：用户的编辑本身就是决定。
                         hold_old = sem
                         hold_reason = "语义疑似重复但判据不确定"
                         out.note = "语义疑似重复但判据不确定：已挂起待确认（不丢弃）"
@@ -291,11 +296,13 @@ class MemoryCore:
             # 规则冲突检测（离线可用）：同对象取值不同 → 挂起确认，人工裁决前旧值继续生效。
             # 前身的冲突判定是纯 LLM（无 key 就断链），这条机械判据让"改口→确认"在离线档
             # 也成立（A36／A30-③／A24）。
-            if hold_old is None and supersede_old is None and src != "model":
+            if hold_old is None and supersede_old is None and src != "model" and not explicit:
                 try:
                     from hippocampus.memory import conflict as conflict_mod
 
-                    for old_id, _placeholder, reason in conflict_mod.detect_rule_conflicts(session.conn, text, kind):
+                    for old_id, _placeholder, reason in conflict_mod.detect_rule_conflicts(
+                        session.conn, text, kind, also_types=("preference", "fact")
+                    ):
                         if old_id == exact:
                             continue
                         hold_old = old_id
@@ -372,6 +379,13 @@ class MemoryCore:
             sys.stderr.write(f"[core] 挂起确认建块失败（软失败）: {e}\n")
 
     def _reindex(self, session: mb.MemorySession) -> None:
+        """写后收尾：同步向量索引 + 重建词法索引。
+
+        **故意不在每次写后清 WAL**：`purge_embeddings_wal` 会把 chroma 的
+        embeddings_queue 里的行进删掉，而刚 upsert 的行可能还没落进索引——实测这样做
+        会让"刚写的记忆检索不到"（demo 从 10/10 掉到 7/10）。WAL 的排空留在会话初始化
+        时做（前身的位置），那里面对的是**别的进程**写下的积压。
+        """
         try:
             rt.sync_index(session.conn, session.collections)
             session.idx = rt.build_bm25(session.conn)
@@ -517,6 +531,12 @@ class MemoryCore:
                 block_text = mb.fire_track_a(session, user_text)
                 if block_text:
                     turn.confirm_block = block_text
+                # [HIPPO] 规则冲突检测：对话里冒出来的改口也要能挂起确认。
+                # 前身的对话冲突判定是纯 LLM（无 key 就断链），而"改口 → 挂起"恰恰是
+                # 招牌机制——所以这里补一条机械判据，离线档同样成立（A36／A30-③／A24）。
+                rule_block = self._rule_conflicts_after_write(session, summary.get("memory_ids", []))
+                if rule_block:
+                    turn.confirm_block = (turn.confirm_block + rule_block).strip()
             if assistant_text:
                 block_text = mb.after_response(session, user_text or "（无用户轮）", [])
                 if block_text:
@@ -524,6 +544,40 @@ class MemoryCore:
             self._reindex(session)
             turn.pending = len(session.pending_blocks)
         return turn
+
+    def _rule_conflicts_after_write(self, session: mb.MemorySession, new_ids: list[str]) -> str:
+        """对话写入之后做一次规则冲突检测：命中就把新条挂起并返回确认块文本。
+
+        处置与 `write()` 里的一致：**新条降为 candidate（不丢），旧值在裁决前继续生效**。
+        """
+        from hippocampus.memory import conflict as conflict_mod
+
+        blocks: list[str] = []
+        for mid in new_ids:
+            mem = self._load_memory(session, mid)
+            if mem is None or mem.get("status") != "active":
+                continue
+            try:
+                conflicts = conflict_mod.detect_rule_conflicts(
+                    session.conn,
+                    mem.get("content") or "",
+                    mem.get("type"),
+                    also_types=("preference", "fact"),
+                )
+            except Exception as e:
+                sys.stderr.write(f"[core] 对话规则冲突检测跳过（软失败）: {e}\n")
+                continue
+            conflicts = [c for c in conflicts if c[0] != mid]
+            if not conflicts:
+                continue
+            session.conn.execute(
+                "UPDATE memories SET status='candidate', updated_at=? WHERE id=?", (db.now_ms(), mid)
+            )
+            session.conn.commit()
+            self._queue_pending(session, [(conflicts[0][0], mid, conflicts[0][2])], reason=conflicts[0][2])
+            if session.pending_blocks:
+                blocks.append(session.pending_blocks[-1].render())
+        return "\n\n---\n" + "\n".join(blocks) if blocks else ""
 
     def confirm(self, scope: Scope, text: str) -> ConfirmResult | None:
         """消费一条确认指令（`确认 n` / `否决`）。非确认指令返回 None。"""
@@ -627,6 +681,7 @@ class MemoryCore:
             kind=old["type"],
             source_quote=(reason or f"由 {memory_id} 修改而来"),
             episode_id=old.get("source_episode_id") or None,
+            explicit=True,  # 用户直接编辑 = 已表达确定意图，不需要再挂起确认
         )
         if result.ids:
             with self._lock(scope.account).held(), session.lock:

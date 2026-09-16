@@ -20,7 +20,7 @@ Hippocampus 把"记忆"做成 agent 的核心能力，而不是外挂的检索�
 
 ```bash
 # 安装（三选一；尚未发布 PyPI，所以前两条是现在能用的路径）
-pip install "hippocampus-agent[vector,proxy] @ git+https://github.com/<owner>/hippocampus-agent"
+pip install "hippocampus-agent[vector,proxy] @ git+https://github.com/Chestnuts-Sisyphus/hippocampus-agent"
 #   或：把源码目录拷到本机后  pip install -e "/path/to/hippocampus-agent[vector,proxy]"
 #   或（不装，只跑）：          PYTHONPATH=/path/to/hippocampus-agent/src python -m hippocampus.cli doctor
 

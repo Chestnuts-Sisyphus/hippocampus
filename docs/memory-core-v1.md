@@ -24,8 +24,10 @@ class MemoryCore:
 
     # —— 冻结的五个语义入口 ——
     def write(scope, content, *, kind="fact", source_quote="", entities=None,
-              source=None, episode_id=None) -> WriteResult
+              source=None, episode_id=None, explicit=False) -> WriteResult
         # 显式写入（不经模型抽取）。source="model" → shadow=1（永不注入）。
+        # explicit=True：调用方已表达确定意图（用户直接编辑／显式"记住"）→ 跳过冲突挂起；
+        # 冲突挂起是给"对话里冒出来的新说法"用的。
         # 去重：完全重复跳过；语义命中 → supersede／admit；**判据不确定或冲突 → 挂起确认**（绝不丢弃）
 
     def search(scope, query, *, limit=8, flow="user", include_dropped=True) -> SearchResult
