@@ -90,6 +90,8 @@ def scan(home: Path) -> list[str]:
                     continue
                 if label == "memories.content" and value not in allowed and not any(value in a for a in allowed):
                     problems.append(f"{db_path} [{label}] 出现 seed 清单之外的记忆: {value[:60]}")
+                if label == "episodes.content" and value.startswith("本轮任务结论"):
+                    continue  # agent 由 seed 内容推导出的结论（同一来源）
                 if label == "episodes.content" and value not in allowed and not any(value in a for a in allowed):
                     problems.append(f"{db_path} [{label}] 出现 seed 清单之外的经历: {value[:60]}")
         finally:

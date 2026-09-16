@@ -17,6 +17,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import Annotated, Any, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -58,6 +59,19 @@ def _memory_lines(
     dropped = [{"id": d.id, "reason": d.reason, "score": round(d.score, 4)} for d in injection.dropped]
     scored = [(float(item.score), str(item.channel or "")) for item in injection.items]
     return lines, list(injection.injected_ids), dropped, scored
+
+
+_ABS_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/][^\s，。；、）)】]+)|(?:/(?:home|Users)/[^\s，。；、）)】]+)")
+
+
+def _sanitize(text: str) -> str:
+    r"""固化前抹掉本机绝对路径。
+
+    为什么：agent 的结论里常带"已写入 D:\AI\...\x.md"这类本机路径，把它写进记忆
+    等于把个人机器的目录结构永久留在记忆里——既是隐私问题，也让记忆换机不可移植。
+    记忆里留"已写入某文件"这个事实就够了。
+    """
+    return _ABS_PATH_RE.sub("（本地路径）", text or "")
 
 
 def build_graph(core: MemoryCore, scope: Scope, *, tools: ToolBox, policy: Any, recorder: list[dict[str, Any]]):
@@ -156,7 +170,7 @@ def build_graph(core: MemoryCore, scope: Scope, *, tools: ToolBox, policy: Any, 
         if exit_kind == "completed" and lines and state.get("task"):
             outcome = core.write(
                 scope,
-                f"本轮任务结论：{text[:200]}",
+                f"本轮任务结论：{_sanitize(text)[:200]}",
                 kind="status",
                 source_quote=f"任务：{state.get('task', '')[:120]}",
                 source="model",

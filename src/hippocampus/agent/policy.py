@@ -128,7 +128,10 @@ class RulePolicy:
                 return Decision("remember", {"content": payload[:200], "kind": _guess_kind(payload)}, "任务要求记下")
             if intent == "list_memories" and "list_memories" in available:
                 return Decision("list_memories", {"kind": "preference", "limit": 20}, "任务要求列清单")
-            if intent == "write_file" and "write_file" in available and has_evidence:
+            if intent == "write_file" and "write_file" in available:
+                # 写文件类**不以"检索到证据"为前提**：用户明确要求导出，就把现有内容导出；
+                # 内容空不空是结果问题，不是该不该动手的问题（危险动作的闸在工具层的确认
+                # 机制，不在证据闸）。这样"放行/拒绝"只取决于确认状态，不取决于索引时机。
                 body = "\n".join(memory_lines)
                 return Decision(
                     "write_file",
