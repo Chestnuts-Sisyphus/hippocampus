@@ -1,0 +1,47 @@
+# 数据与运行产物（绝不入库）
+accounts/
+*.db
+*.db-journal
+*.db-wal
+*.sqlite3
+chroma/
+*_chroma/
+models/
+hippocampus_config.json
+config.json
+config.json.tmp
+
+# 轨迹与评测产物
+memory-export.md
+*.export.md
+traces/
+runs/
+*.trace.json
+eval-out/
+demo-*.json
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# 编辑器与系统
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+*.swp
+
+# 凭据（本项目不用 .env，留这条是防止有人手滑）
+.env
+.env.*
+!.env.example

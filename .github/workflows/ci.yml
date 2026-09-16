@@ -1,0 +1,72 @@
+name: CI
+
+# 全程无 key、无网（离线档）：CI 跑的就是"什么都没配"时的能力边界。
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  offline-suite:
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+        python-version: ["3.11", "3.12"]
+    env:
+      # 关键：CI **不注入任何凭据**，并显式打开离线档。
+      # 任何"偷偷需要模型"的代码路径都会在这里失败。
+      HIPPOCAMPUS_OFFLINE: "1"
+      HIPPOCAMPUS_HOME: ${{ github.workspace }}/_ci_home
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      - name: 安装（核心 + 开发依赖）
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: 记忆核心测试（含随迁测试）
+        run: python -m pytest tests/ -q
+
+      - name: 接口契约（v1 冻结）
+        run: python scripts/check_interface.py
+
+      - name: 依赖审计（全局依赖残留必须为 0）
+        run: python scripts/audit_deps.py
+
+      - name: 凭据扫描（零命中）
+        run: python scripts/scan_credentials.py
+
+      - name: 离线冒烟：seed → demo（无 key / 无网）
+        run: |
+          hippocampus doctor
+          hippocampus --account ci seed
+          hippocampus --account ci demo --questions 10 --memories
+
+      - name: 示例库无个人数据
+        run: python scripts/scan_personal_data.py --home "%HIPPOCAMPUS_HOME%/accounts/ci"
+        shell: cmd
+        if: runner.os == 'Windows'
+
+      - name: 示例库无个人数据（Linux）
+        run: python scripts/scan_personal_data.py --home "$HIPPOCAMPUS_HOME/accounts/ci"
+        if: runner.os == 'Linux'
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - run: pip install ruff
+      - run: ruff check src tests scripts
