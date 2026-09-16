@@ -1,6 +1,9 @@
 name: CI
 
 # 全程无 key、无网（离线档）：CI 跑的就是"什么都没配"时的能力边界。
+# 两个任务：
+#   full       —— 装齐可选依赖（向量 + 代理），跑完整测试与全部检查脚本
+#   core-only  —— 只装核心依赖，证明"不装向量库也能跑记忆纪律"（A38 的核心口径）
 on:
   push:
   pull_request:
@@ -10,7 +13,7 @@ permissions:
   contents: read
 
 jobs:
-  offline-suite:
+  full:
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -29,12 +32,12 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
 
-      - name: 安装（核心 + 开发依赖）
+      - name: 安装（核心 + 开发依赖 + 可选形态）
         run: |
           python -m pip install --upgrade pip
-          pip install -e ".[dev]"
+          pip install -e ".[dev,vector,proxy]"
 
-      - name: 记忆核心测试（含随迁测试）
+      - name: 测试（含随迁的记忆层测试）
         run: python -m pytest tests/ -q
 
       - name: 接口契约（v1 冻结）
@@ -46,20 +49,38 @@ jobs:
       - name: 凭据扫描（零命中）
         run: python scripts/scan_credentials.py
 
-      - name: 离线冒烟：seed → demo（无 key / 无网）
+      - name: 离线冒烟：doctor → seed → demo（无 key / 无网）
         run: |
           hippocampus doctor
           hippocampus --account ci seed
           hippocampus --account ci demo --questions 10 --memories
 
-      - name: 示例库无个人数据
-        run: python scripts/scan_personal_data.py --home "%HIPPOCAMPUS_HOME%/accounts/ci"
-        shell: cmd
-        if: runner.os == 'Windows'
+      - name: 示例库扫描（无个人数据、无真实记忆）
+        run: python scripts/scan_personal_data.py --home "${{ env.HIPPOCAMPUS_HOME }}/accounts/ci"
 
-      - name: 示例库无个人数据（Linux）
-        run: python scripts/scan_personal_data.py --home "$HIPPOCAMPUS_HOME/accounts/ci"
-        if: runner.os == 'Linux'
+  core-only:
+    runs-on: ubuntu-latest
+    env:
+      HIPPOCAMPUS_OFFLINE: "1"
+      HIPPOCAMPUS_HOME: ${{ github.workspace }}/_core_home
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 只装核心依赖（不装向量库 / 不装代理端点）
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+
+      - name: 无向量库也能做完整记忆纪律
+        run: |
+          hippocampus doctor
+          hippocampus --account core seed
+          hippocampus --account core demo --questions 10 --memories
+          hippocampus --account core memory list --limit 5
+          hippocampus --account core memory pending
 
   lint:
     runs-on: ubuntu-latest
