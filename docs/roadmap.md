@@ -19,7 +19,7 @@
 | 限制 | 现状 | 影响 |
 |---|---|---|
 | ~~三个守卫模块只有单测、未接入生产路径~~ | **已解决（0.2.0）**：`retrieval_guard`／`missed_extract` 接进 `MemoryCore.consolidate` 轮末，`disambiguate` 同路径（无端点时软失败跳过），`hub_guard` 接进维护扫描 | — |
-| 语义通道的半成品状态 | 默认内置档 `builtin-hash` 是**词法级**表征；装 `[vector]` 并用 `onnx:bge-small-zh-v1.5` 才是神经语义检索 | 默认档的同义改写召回弱；`docs/embedding.md` 给了实测分布 |
+| 语义通道的半成品状态 | 默认内置档 `builtin-hash` 是**词法级**表征；装 `[vector]` 并用 `onnx:bge-small-zh-v1.5` 才是神经语义检索 | 默认档的同义改写召回弱；`docs/embedding.md` 给了实测分布。**bge-zh 端到端已实测（2026-09-18）**：中文合成 demo 10 题＝记忆开 8/10、关 3/10（同题内置词法档开 20/20、关 6/20；10 题样本、离线规则作答器）——bge-zh 在本机中文 demo 上**不优于默认档**，且未过 §三 CI 阈值"开 ≥9/10"（如实记录，不是提分方向） |
 | ~~磁盘/索引异常时的降级是**静默**的~~ | **已解决（0.2.0）**：`doctor` 有"索引健康"行（chroma 可写性＋集合条数 vs 库内 active 条数）；索引写失败/检索失败会记入会话并在注入结果 `note` 里明确告警；索引写入后校验收敛、查询失败自愈一次 | — |
 | ~~记忆后端不可替换~~ | **已解决（0.2.0）**：抽出 `MemoryBackend` 协议（`core/backend.py`），SQLite＋Chroma 是默认实现；`hippocampus export/import` 提供目录包迁移（含 schema 版本） | — |
 | 可求证机制（正本 §三-4 新增设计） | **设计稿已出、未实现**：`docs/verification-design.md`（可求证判定／三级判据 L1 存在性·L2 库内一致性·L3 外站探测／三态失败处理／与四类型交互＋A42–A45 锚点） | 交栗子过目 → 写回正本 → 施工 |
@@ -55,7 +55,7 @@
 | ~~无版本标签~~ | **已解决**：`v0.2.0` tag＋Release（见 GitHub Releases） | — |
 | 未发布 PyPI | 安装走 GitHub 直装 / 源码；分发名 `hippocampus-agent` 已在 PyPI 占位可用 | `pip install` 装不到 |
 | ~~无导入/导出命令~~ | **已解决（0.2.0）**：`hippocampus export <目录>` / `import <目录>`（目录包含 manifest 与 schema 版本；导入默认不覆盖，`--force` 时旧库留 `.bak` 副本） | — |
-| 演示脚本 | `scripts/demo.sh`／`scripts/demo.ps1`（起代理→灌数据→三格式请求→评测→结果表）；bash 版已实测，**PowerShell 版未实测** | Windows 用户首次运行可能需微调 |
+| 演示脚本 | `scripts/demo.sh`／`scripts/demo.ps1`（起代理→灌数据→三格式请求→评测→结果表）；**两版均已实测（2026-09-18）**：`demo.ps1` 修了无 BOM 导致 PowerShell 按 ANSI 解析中文串报语法错的问题（已带 UTF-8 BOM），之后五段全通（doctor→seed→代理 8765→三格式请求→20 题评测 开 20/20／关 6/20／基线 18/20） | 换系统区域设置（非简体中文）时仍需 BOM 保障 |
 | **单条写入随库规模线性变慢** | 每次 `write` 触发**全量**索引同步：1154 记忆规模下 p50 **749 ms**／1.32 条/秒（`scripts/bench_scale.py` 实测） | 会话里每轮多几次写入即可感知；改进方向＝**增量 upsert**（只同步变化行），本轮未做（改动面大、需重新标定） |
 
 ## 六、实测数字（2026-09-17 · 本机 AMD 7500F／Windows／Python 3.11）

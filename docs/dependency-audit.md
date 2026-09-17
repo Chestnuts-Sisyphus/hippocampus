@@ -70,3 +70,22 @@ chromadb  fastapi  httpx  jieba  keyring  langgraph  numpy  onnxruntime  tokeniz
 ```bash
 python scripts/audit_deps.py     # 残留全局依赖数为 0 → 退出码 0
 ```
+
+## 五、离线 advisory 联网复核（G19·D3 收口，2026-09-18）
+
+Mimosa 扫描的离线公告库命中 2 包 2 组 advisory；本轮用 **pip-audit（联网 OSV/PyPI 实时数据，
+出站 https）对 venv site-packages 复扫**，关联到的包与影响评估如下：
+
+| 包（版本） | 联网确认的 advisory | 本项目使用面 | 影响结论 |
+|---|---|---|---|
+| `chromadb` 1.5.9 | 5 条（CVE-2026-45829 未认证代码注入 / 45833 认证代码注入 / 45831 RBAC 绕过 / 45830 授权校验缺失 / 45834 系列） | 只用**内嵌 `PersistentClient(path=…)`**（本地向量库）＋ `ONNXMiniLM_L6_V2` embedding 函数；不跑 server、不开 HTTP、不用任何 auth provider | **不可达**：CVE 全部位于服务端/认证面，本项目的嵌入使用无这些入口。升级注意：chroma 版本升级曾改变内部行为（见 `docs/roadmap.md` B6 残余风险），升级需回归 hnsw 段读取 |
+| `nltk` 3.10.3 | 1 条（CVE-2026-81726，模型工件路径受调用方控制） | 只用 `nltk.stem.PorterStemmer`（本地纯 Python 词干，官方判分臂用）；不调任何 `nltk.download`/模型工件 API | **不可达**：脆弱 API（模型工件下载/路径）未使用 |
+| 其余 130 个依赖包 | 0 条 | — | 干净 |
+
+**结论**：2 条离线 advisory 联网复核为**真实存在但本项目使用面不可达**（嵌入向量库本机使用＋
+词干器本地纯 Python）。**不建议因 CVE 立即升版**（chroma 升级有历史风险），跟踪升级窗口即可。
+复跑命令：
+```bash
+uv pip install --python .venv/Scripts/python.exe pip-audit
+.venv/Scripts/python.exe -m pip_audit --path .venv/Lib/site-packages -f json
+```

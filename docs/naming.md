@@ -46,3 +46,13 @@ netstat -ano | grep -E ":8765\b" || echo "8765 free"
 ```
 
 > 端口实测为本机口径（`netstat` 只看本机）；换机复跑同法。
+
+## 四、术语与代码列对照（A8/A9 登记，2026-09-18）
+
+代码列名 **不等于** 用户可见口径，这里登记映射，避免文档与代码各说各话：
+
+| 代码里 | 正本/用户口径 | 说明 |
+|---|---|---|
+| `memories.shadow=1` / 库内 `shadow` 列 | **观察轨（模型侧）** | A8：确认轨/非确认轨是双轨，模型输出不走正式记忆，`shadow=1` 是"观察轨内部实现"列名。模型输出提取的条目永不注入，确认后经 `promote_shadow` 晋升为正式记忆 |
+| `entities.is_hub`（hub_guard 标记） | mega-hub 诊断标记 | A9 结论：**检索侧不消费**——按前身设计，`is_hub` 只是维护扫描的"报告/分流建议"标记；检索侧的遍历上限由 `retrieval.py` 的 `MAX_GRAPH_PER_ENTITY` 保障（写入/检索两道防线在各自环节），hub 标记不改变检索行为（有测试钉住：`tests/test_n23_t3_small_fixes.py::test_hub_flag_does_not_filter_retrieval`） |
+| `status='candidate'` | 待裁决候选 | 写入时与旧值冲突→挂起，裁决前不参与注入/去重；计数视图＝`core.candidate_audit`（A12） |

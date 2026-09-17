@@ -83,6 +83,27 @@ HIPPOCAMPUS_OFFLINE=1 .venv/Scripts/python.exe scripts/bench_ab.py \
 > 池化方式按模型官方配置（bge＝CLS、gte＝mean）：拿错池化会得到"越换越差"的假结论。
 > 换档只影响**查询侧**吗？不是——文档侧向量也变，所以**换档必须重新导入**（A/B 脚本按数据根隔离）。
 
+### 二·二b 失败归因（`bench_diag`）与复用导入的两个坑
+
+**`bench_diag` 用法**（E2/G7：文档补齐；离线档，复用 A/B 的数据根免重复导入）：
+
+```bash
+# 证据没进上下文时，拆一层：证据轮的一上/一下轮在不在？同会话其它轮在不在？
+HIPPOCAMPUS_OFFLINE=1 HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-base-en-v1.5" \
+  python scripts/bench_diag.py --data D:/tmp/hc-bench/locomo10.json \
+  --home D:/tmp/hc-bench/ab/onnx-Xenova-bge-base-en-v1.5 --convs 3 --limit 80 \
+  --json D:/tmp/hc-bench/diag_neighbors.json
+```
+
+输出三行：证据命中；未命中里**证据轮上一轮/下一轮已在上下文**（=「±1 轮扩展」能捞回的上界）；
+未命中里至少同会话有其它轮（会话级召回到了、轮级定位没到）。判据细节：同会话/邻居判据为
+**整句精确匹配**（normalize 后全文在上下文里才算），不用短前缀——前缀会撞上别的轮导致高估
+（E3/G8 修正，宁可低估不高估）。
+
+**复用导入双表坑**（E5/G10）：`bench_ab.py --reuse-import` 判定"这个数据根导过没有"查的是
+**memories＋episodes 双表**——基准导入口径把用户轮落记忆条、助手轮落经历层，只查一张表会把
+"只有助手轮的对话"误判成没导入而重复导入（向量重复计数、数字虚低）。
+
 ### 二·三 官方判分臂（显式开关 `--model-arm`）
 
 官方口径要两步：**模型基于注入上下文作答** ＋（LongMemEval）**LLM 判分**。prompt 与判分
@@ -117,6 +138,72 @@ HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-small-en-v1.5" \
 报告 JSON 的 `official` 段含：模型名／temperature／并发／重试／超时／预算、`input_spec`
 （8 条注入非全文）、调用次数、tokens、估算花费、**跑前/跑后余额与实际花费**、逐题
 prediction/label/error、失败数与跳过数（有失败必须在报告里如实写"未跑完"）。
+
+### 二·四 ±1 轮邻居扩展（A1/T7，`--neighbors` 显式开）
+
+**机制**：基础注入（top-8）之后，把**已注入轮的上一轮/下一轮**（同 session 内，不跨会话越界）
+追加进上下文（追加预算 `--neighbor-budget`，默认 6，只裁剪追加量）。为什么这样扩：
+`bench_diag` 实测未命中题里 38.3% 的**证据轮邻居已在上下文**——检索命中的往往是证据轮的
+邻居，扩一轮就能把证据本身带回来（原检索口径上界 +22.5pp，本轮把上界兑现了大半）。
+
+**实测（LoCoMo 全量 1986，bge-small 神经档）**：
+
+| 口径 | 证据在文内 | 答在文内 | tokens | 官方 F1（模型臂） |
+|---|---|---|---|---|
+| 无邻居（既有） | 45.7% | 17.4% | 1354 | 32.55%（CI 30.8–34.4） |
+| **`--neighbors`（budget 6）** | **63.65%** | 22.7% | **1767（+413，+30%）** | **38.68%（CI 36.8–40.5，+6.13pp）** |
+
+分类看：cat2 时间 6.7→**11.06**（短板类被正面改善）；cat4 单跳 38.5→51.77；cat1 20.8→25.38；
+cat5 对抗 51.4→**48.0（−3.4pp，对抗题邻居可能引入干扰，如实记录）**。检索口径≥48% 达标；
+官方分联动验证（T7-④，预算内）也过了——"检索提升 → 官方分提升"因果链闭合。
+复跑：
+```bash
+HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-small-en-v1.5" hippocampus \
+  --home D:/tmp/hc-bench/run-loco-neighbors bench locomo --data D:/tmp/hc-bench/locomo10.json \
+  --neighbors --json D:/tmp/hc-bench/loco_neighbors.json   # 检索口径
+# 官方联动：+ --model-arm（需端点+凭据；预算闸 ¥30 内，全量 ≈¥4.6）
+```
+
+### 二·五 英文实体抽取 A/B 与逐通道消融（T8/T9，2026-09-18）
+
+**英文实体（T8，A4）**：`--english-entities` 在导入时机械抽取英文专名（句中大写连续词，排除
+句首/停用词）挂进图通道。全量 LoCoMo 1986 对照（同一 `bench` 口径、同批题）：
+**off 43.0% → on 42.55%（−0.45pp，n=1986）——否定结论**：图通道对英文实体的贡献接入后仍
+无收益，瓶颈仍在轮级定位（与 §二·四 的邻居扩展结论一致）。复跑：`bench locomo --english-entities`。
+
+**逐通道消融（T9，A5/A6）**：`scripts/bench_ablation_channels.py`（497 题抽样，3 段对话，
+bge-small，每变体独立数据根，只关一个通道）：
+
+| 变体 | 证据在文内 | 差（pp） |
+|---|---|---|
+| 全开 | 42.66% | — |
+| 关 semantic | 42.86% | +0.20 |
+| 关 bm25 | 43.26% | +0.60 |
+| 关 graph | 42.86% | +0.20 |
+| 关 event | 42.45% | −0.21 |
+
+**结论一句话**：四通道两两高度冗余，关任何一个都在 ±0.6pp 内（n=497 标准误 ±1.1pp 内=统计打平）——
+**单一通道都不是瓶颈**；既有"去掉整个记忆条层掉 9pp"的粗口径依然成立（那是整层，不是单通道）。
+哨兵：`--sentinel --sentinel-threshold 45`（神经档全开证据命中下限）；CI 用全量档跑，低于则红。
+
+### 二·七 多账户常态压测（T4/A15，`scripts/bench_multi_account.py`）
+
+日常可跑的多账户/长跑压测（合成数据、离线、零凭据）：N 账户每账户几条记忆 + 1 次查询，
+报告**证据命中**与**进程峰值工作集**（LRU 上限生效时多账户内存有界）。200 账户实测
+（2026-09-18，cache_max=16）：证据命中 **100%**、峰值 **365.8 MB**、45s。看门限
+（`--sentinel` 启用）：证据命中 ≥98%、峰值 <2000 MB。CI 可带。复跑：
+```bash
+python scripts/bench_multi_account.py --accounts 200 --json D:/tmp/multi_account_200.json
+```
+
+### 二·六 批次漂移归因（T10，C1 收口）
+
+LME 200 题三臂对照（同数据同代码同嵌入，离线）：fresh home A 第一遍 **48.5%**；**同一 home
+第二遍 42.5%（−6.0pp）**；fresh home B 48.5%（与 A1 差 0.0pp）。**结论：跨 fresh 批次恒等、
+同库重放掉 6pp**——漂移变量是**同库重放的候选排序**（第一遍 touch 了命中记忆 → 第二遍
+"最新优先"排序失去区分度 → 12 题答案被挤出注入位，n_injected/tokens 分布同步变化），
+**不是批次/数据/嵌入变量**。测量纪律：**官方分与检索口径的基准数字以 fresh 库第一次跑为准**；
+复跑必须清 home（`run-*` 目录不复用）。
 
 ## 三、口径（写在表头上，别让读者猜）
 

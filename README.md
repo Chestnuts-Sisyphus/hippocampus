@@ -46,10 +46,11 @@ the official repositories (pinned revisions, see `docs/benchmark.md` §2.3).
 |---|---|---|---|
 | LongMemEval-oracle | LLM-judged accuracy (official judge prompts) | **70.5% (63.8%–76.4%, Wilson)** | 200 (sampled) |
 | LoCoMo-10 | Official F1 (Porter-stemmed token F1, official eval script) | **32.55% (30.8%–34.4%, bootstrap)** | 1986 (full) |
+| LoCoMo-10 + `--neighbors` (±1-turn expansion) | same official F1 | **38.68% (36.8%–40.5%, bootstrap)** | 1986 (full) |
 
 Same-run retrieval metrics (evidence-in-context / answer-in-context): LongMemEval **100.0%** /
-48.5%; LoCoMo **45.5%** / 17.4% (with neural embedding `bge-small-en-v1.5`; default zero-download
-lexical tier: 36.7%).
+48.5%; LoCoMo **45.5%** / 17.4% baseline, **63.7%** / 22.7% with the neighbor-expansion arm
+(`--neighbors`; with neural embedding `bge-small-en-v1.5`; default zero-download lexical tier: 36.7%).
 
 > **Honest footnotes (do not skip when citing):** the model arm uses `deepseek-chat` at
 > temperature 0, and its input is the memory layer's top-8 injected context, so these numbers are
@@ -58,8 +59,15 @@ lexical tier: 36.7%).
 > built in; every run records balance before/after).
 
 Performance (real-scale synthetic store: 1,154 memories / 2,406 entities / 6,035 relations /
-497 episodes): 4-channel retrieval p50 **43.7 ms** / p95 55.1 ms; injection assembly p50
-106.8 ms; single write p50 632.8 ms (full index sync — known bottleneck, see `docs/roadmap.md`).
+497 episodes): 4-channel retrieval p50 **48 ms**; injection assembly p50 109 ms; single write
+p50 **42 ms** (incremental index sync, 2026-09-18; was 632.8 ms with full re-sync);
+multi-account memory bounded by an LRU session cache: LME neural benchmark (200 accounts) peak
+RSS **~1.1 GB** (was ~4 GB), evidence recall still 100%.
+
+> **Number source-of-truth (F2):** every figure above is maintained in sync with the results
+> document (数字正本: `本地求职目录/投递/Hippocampus-基准评测结果-20260917.md`, latest re-measurement
+> 2026-09-18). If a number changes anywhere, update both places the same day — see
+> `docs/release-sync.md` for the exact sync checklist.
 
 Full numbers, category breakdowns, CI methods, costs, and repro commands:
 `docs/benchmark.md` + `docs/roadmap.md`.
@@ -146,8 +154,11 @@ memory writes are safe-ident/safe-DDL checked, and offline mode means *no outbou
 | Doc | What it covers |
 |---|---|
 | [`docs/benchmark.md`](docs/benchmark.md) | Public-benchmark protocol: pinned dataset revisions (sha256), retrieval/official judging arms, repro commands |
+| [`docs/benchmark.en.md`](docs/benchmark.en.md) | English one-pager: what the official judging arm measures, guards, and measured results |
+| [`docs/release-sync.md`](docs/release-sync.md) | GitHub sync discipline: push/number-sync/tag checklist so the repo never lags the local results |
 | [`docs/roadmap.md`](docs/roadmap.md) | Known limitations, honest boundaries, improvement roadmap |
 | [`docs/proxy.md`](docs/proxy.md) | Proxy form: format matrix, auth, streaming, honest boundaries |
+| [`docs/deployment.md`](docs/deployment.md) | Deployment modes: loopback-only default, multi-instance, exposing behind TLS |
 | [`docs/memory-core-v1.md`](docs/memory-core-v1.md) | `MemoryCore` v1 interface contract (append-only) |
 | [`docs/security.md`](docs/security.md) | Threat model, outbound URL rules, credential handling |
 | [`docs/embedding.md`](docs/embedding.md) | Embedding tiers, which to choose (with measurements), pooling per model |
