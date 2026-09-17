@@ -22,6 +22,11 @@ def proxy_config() -> dict[str, Any]:
     return _cfg.get_proxy_config()
 
 
+def llm_config() -> dict[str, Any]:
+    """模型端点配置（含 base_url／api_mode；凭据只在本模块内用，不打印）。"""
+    return _cfg.get_llm_config()
+
+
 def agent_config() -> dict[str, Any]:
     """Agent 形态配置：max_steps / model / confirm_block。"""
     return _cfg.get_agent_config()
@@ -90,6 +95,13 @@ def upstream_endpoint() -> str:
     return llm.endpoint_mode()
 
 
+def instance_token(create: bool = False) -> str:
+    """本地代理实例令牌（A2）：首次启动生成落盘，之后复用；doctor 只显前 8 位。"""
+    from hippocampus.memory import config as _cfg
+
+    return _cfg.get_instance_token(create=create)
+
+
 def validate_scope_id(account_id: str | None) -> str:
     """校验 scope 标识（目录穿越防护）。形态层的入口用它挡外部输入。"""
     from hippocampus.memory.account import safe_account_id
@@ -100,8 +112,10 @@ def validate_scope_id(account_id: str | None) -> str:
 __all__ = [
     "DEFAULT_PORT",
     "agent_config",
+    "instance_token",
     "llm_chat_json",
     "llm_chat_messages",
+    "llm_config",
     "llm_post_json",
     "upstream_endpoint",
     "tier_params",

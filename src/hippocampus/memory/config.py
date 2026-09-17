@@ -196,6 +196,35 @@ def is_offline() -> bool:
     return bool((get_config().get("offline") or {}).get("enabled", False))
 
 
+def instance_token_path() -> Path:
+    """本地代理实例令牌文件（数据根下独立文件，不进 config.json——配置只放非敏感项）。"""
+    return runtime.data_root() / "instance_token"
+
+
+def get_instance_token(create: bool = False) -> str:
+    """本地代理实例令牌（A2）。
+
+    - 首次启动（`hippocampus proxy`）生成 48 位十六进制并落盘 `instance_token`；
+    - 之后每次启动读取同一份，进程重启令牌不变；
+    - `doctor` 只显示前 8 位；校验失败回 401。
+    它是**本地代理的鉴权令牌**，不是外部模型凭据——外部凭据仍只走环境变量/密钥服务。
+    """
+    path = instance_token_path()
+    try:
+        if path.exists():
+            return (path.read_text(encoding="utf-8") or "").strip()
+        if not create:
+            return ""
+        import secrets
+
+        token = secrets.token_hex(24)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(token, encoding="utf-8")
+        return token
+    except OSError:
+        return ""
+
+
 __all__ = [
     "DEFAULT_CONFIG",
     "DEFAULT_PORT",
@@ -203,9 +232,11 @@ __all__ = [
     "get_agent_config",
     "get_config",
     "get_embedding_config",
+    "get_instance_token",
     "get_llm_config",
     "get_proxy_config",
     "get_security_config",
+    "instance_token_path",
     "is_offline",
     "resolve_api_key",
     "write_config",

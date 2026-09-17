@@ -38,6 +38,15 @@ from hippocampus.proxy import formats
 CONFIRM_HEADER = "x-hippocampus-confirm"  # 客户端可带此头声明"这条回复不追加确认块"
 
 
+class UpstreamHTTPError(RuntimeError):
+    """上游非 2xx（A3）：带状态码与上游错误体，入口**原样透传**给客户端。"""
+
+    def __init__(self, status_code: int, body: Any):
+        super().__init__(f"上游返回 {status_code}: {str(body)[:300]}")
+        self.status_code = int(status_code)
+        self.body = body
+
+
 def _scope_from(headers: dict[str, str], default_account: str = "default") -> Scope:
     """从请求头解析 scope。
 
@@ -58,14 +67,27 @@ def _scope_from(headers: dict[str, str], default_account: str = "default") -> Sc
     return Scope(account=account, session=session[:64], source="user")
 
 
-def build_app(core: MemoryCore, *, confirm_block: bool = True, offline: bool = False, upstream: Any = None):
+def build_app(core: MemoryCore, *, confirm_block: bool = True, offline: bool = False, upstream: Any = None, auth_token: str | None = None):
     """构造 FastAPI 应用。
 
     `upstream(payload, *, model, endpoint, stream, body)` 为转发函数（None=离线档）：
-    收**已转换好的上游请求体**，返回 `(上游响应 dict, usage)`。
+    收**已转换好的上游请求体**，返回 `(上游响应 dict, usage)`（非流式）或
+    逐行 async 生成器（流式，`stream=True` 时）。
+
+    `auth_token`：实例令牌（A2）。None＝从存储读取（`instance_token` 文件）；
+    空串＝不鉴权（测试与无令牌环境）；非空＝要求 `Authorization: Bearer <token>`。
     """
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse, StreamingResponse
+
+    if auth_token is None:
+        auth_token = mem_config.instance_token()
+
+    def _authorized(request: Request) -> bool:
+        if not auth_token:
+            return True
+        header = request.headers.get("authorization", "")
+        return header == f"Bearer {auth_token}" or header == auth_token
 
     app = FastAPI(title="Hippocampus", version="0.1.0", docs_url=None, redoc_url=None)
 
@@ -89,8 +111,21 @@ def build_app(core: MemoryCore, *, confirm_block: bool = True, offline: bool = F
         return {"object": "list", "data": [{"id": "hippocampus", "object": "model", "owned_by": "local"}]}
 
     async def _handle(request: Request, inbound: str):
-        """三种入站格式共用的一条链（识别 → 注入 → 转发 → 固化 → 追加确认块）。"""
-        body = await request.json()
+        """三种入站格式共用的一条链（识别 → 鉴权 → 注入 → 转发 → 固化 → 追加确认块）。"""
+        if not _authorized(request):
+            return JSONResponse(
+                status_code=401,
+                content={"error": {"message": "未提供有效的实例令牌（首次启动生成的令牌见 `hippocampus doctor`）",
+                                    "type": "unauthorized"}},
+            )
+        try:
+            body = await request.json()
+        except Exception as e:
+            # 请求体不是合法 JSON（含编码问题）：回 400，不要把解析错误包成 500
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"message": f"请求体不是合法 JSON（UTF-8）: {e}", "type": "invalid_request"}},
+            )
         headers = dict(request.headers)
         try:
             scope = _scope_from(headers)
@@ -136,8 +171,39 @@ def build_app(core: MemoryCore, *, confirm_block: bool = True, offline: bool = F
         except ValueError as e:
             return JSONResponse(status_code=400, content={"error": {"message": str(e), "type": "invalid_request"}})
 
+        # [真流式]（A1）：上游 SSE 逐行转发 → 客户端逐行收到；流末固化＋确认块末尾 delta
+        if stream:
+            try:
+                up_stream = upstream(payload, model=model, endpoint=upstream_kind, stream=True, body=body)
+            except UpstreamHTTPError as e:
+                # A3：上游非 2xx 原样透传状态码与错误体（流式路径）
+                return JSONResponse(status_code=e.status_code, content=e.body)
+            except Exception as e:  # 上游异常 → 明确报错，不吞
+                return JSONResponse(
+                    status_code=502,
+                    content={"error": {"message": f"上游调用失败: {e}", "type": "upstream_error"}},
+                )
+            from hippocampus.proxy.streaming import stream_forward
+
+            return StreamingResponse(
+                stream_forward(
+                    up_stream,
+                    inbound=inbound,
+                    upstream_kind=upstream_kind,
+                    model=model,
+                    core=core,
+                    scope=scope,
+                    user_text=user_text,
+                    confirm_text=confirm_text,
+                ),
+                media_type="text/event-stream",
+            )
+
         try:
             up_body, usage = upstream(payload, model=model, endpoint=upstream_kind, stream=False, body=body)
+        except UpstreamHTTPError as e:
+            # A3：上游非 2xx 原样透传状态码与错误体（非流式路径）
+            return JSONResponse(status_code=e.status_code, content=e.body)
         except Exception as e:  # 上游异常 → 明确报错，不吞
             return JSONResponse(
                 status_code=502,
@@ -210,7 +276,14 @@ def _respond(
     """按**入站格式**回协议正确的响应（非流式给 JSON，流式给该家协议的 SSE 序列）。"""
     if inbound == formats.INBOUND_RESPONSES:
         if not stream:
-            payload = dict(converted or {})
+            # 有上游转换结果就直接用；离线档（converted=None）用响应适配器构造
+            # ——此前离线回执只回 {"model": ...}，把正文丢了（实测发现）。
+            if converted is not None:
+                payload = dict(converted)
+            else:
+                from hippocampus.proxy.responses_adapter import build_response
+
+                payload = build_response(text, model=model, usage=usage)
             payload.setdefault("model", model)
             return JSONResponse(payload)
         return StreamingResponse(formats.responses_sse(text, model, usage), media_type="text/event-stream")
@@ -268,11 +341,24 @@ def make_upstream():
     """
 
     def _upstream(payload: dict, *, model: str, endpoint: str, stream: bool = False, body: dict | None = None):
-        from hippocampus.settings import llm_post_json
+        from hippocampus.net import validate_endpoint_url
+        from hippocampus.proxy.llm_proxy import build_headers, build_upstream_url, stream_upstream
 
+        cfg = mem_config.llm_config()
+        if stream:
+            # 真流式（A1）：逐行转发上游 SSE。URL 同样过出站校验（A41）；
+            # 非 2xx 由 stream_upstream 抛 UpstreamError（状态码 + 错误体）。
+            url = build_upstream_url(cfg, endpoint)
+            try:
+                validate_endpoint_url(url)
+            except Exception as e:
+                raise RuntimeError(f"上游端点未通过 URL 校验: {e}") from e
+            headers = build_headers(cfg)
+            return stream_upstream(cfg, url, payload, headers)
         status, data = llm_post_json(payload, endpoint=endpoint)
         if status // 100 != 2:
-            raise RuntimeError(f"上游返回 {status}: {str(data)[:300]}")
+            # A3：非 2xx 原样透传（状态码 + 上游错误体），不再包成 502
+            raise UpstreamHTTPError(status, data)
         return data, (data.get("usage") or {})
 
     return _upstream
@@ -288,11 +374,17 @@ def serve(*, host: str, port: int, home: str | Path | None = None, confirm_block
     if not use_offline and not mem_config.endpoint_ready():
         print("（未提供凭据：本进程将按离线档运行——记忆纪律可用，上游转发不可用）")
         upstream = None
+    # A2：实例令牌首次启动生成并落盘（之后复用）；doctor 显示前 8 位
+    token = mem_config.instance_token(create=True)
     app = build_app(core, confirm_block=confirm_block, offline=upstream is None, upstream=upstream)
     print(f"Hippocampus 代理形态监听 http://{host}:{port}")
     print("  支持三种入站：/v1/chat/completions（OpenAI Chat）、/v1/responses（Responses）、"
           "/v1/messages（Anthropic Messages）")
     print(f"  上游端点按 config 的 llm.api_mode：当前 {mem_config.upstream_endpoint()}")
+    if token:
+        print(f"  实例令牌已启用（前 8 位 {token[:8]}…）：请求带 `Authorization: Bearer <完整令牌>`")
+    else:
+        print("  实例令牌：未启用（无令牌环境）")
     print("  把客户端的 base_url 指到 http://host:port 即可；/health 可查格式、端口、锁、索引。")
     try:
         uvicorn.run(app, host=host, port=port, log_level="warning")
