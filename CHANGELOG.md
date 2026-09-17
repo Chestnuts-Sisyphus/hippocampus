@@ -45,6 +45,15 @@
 - **离线档守卫边界**：补实体走**规则抽取**（不再空转），消歧仍软失败跳过；`docs/offline.md` 写死。
 - **CI 加两条闸**：形态路径（真服务／流式／鉴权／tools）先断言 proxy extra 在再跑；
   demo 加**阈值断言**（记忆开 ≥9/10、记忆关 ≤6/10）。
+- **选档与归因工具**：`scripts/bench_ab.py`（A/B 对照：同一批题多档并跑，每档独立数据根、
+  可复用已有导入）、`scripts/bench_ablation.py --reuse-import`（条数消融省掉重复导入）、
+  `scripts/bench_diag.py`（失败归因：证据没进上下文时，是"邻居也没进来"还是"整个会话都没进"）。
+- **池化按模型官方配置**（`_pooling_for`）：bge 系＝CLS、gte 系＝mean。此前一律 CLS——
+  拿 gte 去测会得到"越换越差"的**假结论**（向量打偏，不是模型差）。
+- **公开基准实测（神经档补齐）**：LongMemEval-oracle 抽 200 题 **100.0%** 证据命中
+  （默认档 98.0%）；LoCoMo-10 全量 **47.8%**（`bge-base-en-v1.5`）／45.7%（`bge-small-en-v1.5`）／
+  36.7%（默认词法档）。选档 A/B 表与两条**否定结论**（官方英文查询指令无收益、gte-small 更差）见
+  `docs/benchmark.md`。
 - **文档**：`docs/benchmark.md`（评测协议）、`docs/forms-parity.md`（两形态覆盖表）、
   `docs/framework-ammo.md`（框架弹药卡）、`docs/verification-design.md`（可求证机制设计稿，待过目）。
 

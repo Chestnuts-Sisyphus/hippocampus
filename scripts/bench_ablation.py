@@ -34,6 +34,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--home", required=True, help="基准数据根（与用户库隔离）")
     parser.add_argument("--limit", type=int, default=0, help="题量上限（0=全部）")
     parser.add_argument("--ks", default="8,20,50", help="要对比的注入条数上限，逗号分隔")
+    parser.add_argument("--account-prefix", default="abl", help="账户前缀（复用已有导入时要与造它的那次一致）")
+    parser.add_argument("--reuse-import", action="store_true",
+                        help="库里已有记忆就跳过导入（省掉重新导入的时间；配 --home 指向已建好的库）")
     parser.add_argument("--json", help="结果写入路径")
     args = parser.parse_args(argv)
 
@@ -49,9 +52,15 @@ def main(argv: list[str] | None = None) -> int:
     reports: dict[str, dict] = {}
     try:
         for gi, (_group, group_items) in enumerate(groups.items(), 1):
-            scope = Scope(account=f"abl-{gi}", session="bench", source="user")
-            core.ingest_history(scope, [pb._turn_dict(t, True) for t in group_items[0].turns])  # noqa: SLF001
+            scope = Scope(account=f"{args.account_prefix}-{gi}", session="bench", source="user")
             session = core._session(scope)  # noqa: SLF001
+            done = False
+            if args.reuse_import:
+                with session.lock:
+                    row = session.conn.execute("SELECT COUNT(*) AS c FROM memories").fetchone()
+                    done = bool(row and row["c"])
+            if not done:
+                core.ingest_history(scope, [pb._turn_dict(t, True) for t in group_items[0].turns])  # noqa: SLF001
             for k in ks:
                 with session.lock:
                     db.set_active_params(session.conn, {"injection_max_items": int(k)}, reason=f"消融 k={k}")

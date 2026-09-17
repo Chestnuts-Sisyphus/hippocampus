@@ -35,10 +35,37 @@ from hippocampus.memory import runtime
 # bge 官方检索指令（BAAI/bge-small-zh-v1.5 Model List 逐字）
 BGE_QUERY_INSTRUCTION = "为这个句子生成表示以用于检索相关文章："
 
-# 查询侧需加检索指令的 ONNX 中文模型（s2p 检索任务，bge 官方用法）
+# bge 官方英文检索指令（BAAI/bge-small-en-v1.5、bge-base-en-v1.5 Model Card 逐字：
+# "Represent this sentence for searching relevant passages: "）
+BGE_EN_QUERY_INSTRUCTION = "Represent this sentence for searching relevant passages: "
+
+# 查询侧需加检索指令的 ONNX 模型（s2p 检索任务，bge 官方用法：查询侧加、文档侧不加）。
+# 只登记**本机实测有收益**的档：中文档 `bge-small-zh-v1.5` 有（官方用法）；
+# 英文档**实测无收益**——LoCoMo 80 题 A/B：加指令 33.75% → 32.5%（−1.25 pp，等于 1 题，
+# 噪声级）却多花 ~80 tokens，故**不登记**（要复现/启用走 scripts/bench_ab.py 的 `instr=on`）。
 _QUERY_INSTRUCTION_BY_MODEL = {
     "Xenova/bge-small-zh-v1.5": BGE_QUERY_INSTRUCTION,
 }
+
+# 实验用覆盖（仅供 scripts/bench_ab.py 做"加不加指令"的 A/B；生产默认 None＝按模型表。
+# ""（空串）＝该变体强制关掉指令；非空＝强制使用该指令）
+_EXP_QUERY_INSTRUCTION_OVERRIDE: str | None = None
+
+
+def query_instruction_for(repo: str) -> str:
+    """该模型的查询侧检索指令（未登记＝空串，行为与上游一致：查询与文档同空间）。"""
+    return _QUERY_INSTRUCTION_BY_MODEL.get(repo, "")
+
+
+def _pooling_for(repo: str) -> str:
+    """池化方式：**模型官方配置**决定，不能一刀切。
+
+    - bge 系列（BAAI/bge-*）：CLS 池化（Model Card 明写 "using the CLS token"）。
+    - gte 系列（Alibaba-NLP/gte-*，Xenova/gte-*）：mean 池化（随仓库的 1_Pooling 配置
+      `pooling_mode_mean_tokens=true`）。拿 CLS 去用 gte 会把向量打偏——"换了模型反而更差"
+      的常见原因，所以按名判池化。
+    """
+    return "mean" if "gte" in repo.lower() else "cls"
 
 # 必需下载文件（不含量化变体 model_bnb4/model_fp16/model_int8/model_q4 等）
 _REQUIRED_FILES = (
@@ -232,7 +259,13 @@ class ONNXEmbeddingFunction:
 
     def __init__(self, repo: str):
         self.repo = repo
-        self.query_instruction = _QUERY_INSTRUCTION_BY_MODEL.get(repo, "")
+        # 查询指令（bge 官方 s2p 用法：查询侧加、文档侧不加）。
+        # 实验覆盖仅供 scripts/bench_ab.py 做 A/B；生产默认 None（＝按模型表）。
+        if _EXP_QUERY_INSTRUCTION_OVERRIDE is None:
+            self.query_instruction = query_instruction_for(repo)
+        else:
+            self.query_instruction = _EXP_QUERY_INSTRUCTION_OVERRIDE
+        self.pooling = _pooling_for(repo)
         self._tokenizer = None
         self._session = None
         self._fallback = None
@@ -301,7 +334,12 @@ class ONNXEmbeddingFunction:
             elif name == "token_type_ids":
                 feed[name] = np.array([e.type_ids for e in encs], dtype=np.int64)
         out = self._session.run(None, feed)[0]  # [batch, seq, hidden]
-        emb = out[:, 0, :]  # CLS pooling（bge 官方）
+        if self.pooling == "mean":
+            # mean pooling（gte 官方）：按 attention_mask 加权平均，忽略 [PAD]
+            mask = feed["attention_mask"].astype(np.float32)[:, :, None]
+            emb = (out * mask).sum(axis=1) / np.clip(mask.sum(axis=1), 1e-9, None)
+        else:
+            emb = out[:, 0, :]  # CLS pooling（bge 官方）
         norms = np.linalg.norm(emb, axis=1, keepdims=True)
         norms[norms == 0] = 1.0
         emb = emb / norms  # L2 归一化（cosine 空间）

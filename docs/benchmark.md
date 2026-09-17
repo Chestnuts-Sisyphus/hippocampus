@@ -49,6 +49,35 @@ hippocampus bench locomo --data <同上> --inject-max-items 20
 此前在"环境里有 key"的情况下跑基准，记忆层的维护链对模型端点发了 205 次请求（全 401）——
 既不可复现，也可能烧掉用户的钱，所以这一条是纪律而不是可选项。
 
+### 换嵌入档（当前最大的一个变量）
+
+```bash
+# 神经档：首次联网下载一次 ONNX 到 ~/.hippocampus/models/<repo>/（之后纯本地推理）
+HIPPOCAMPUS_OFFLINE=1 HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-base-en-v1.5" \
+  hippocampus bench locomo --data D:/tmp/hc-bench/locomo10.json --json D:/tmp/locomo-bgebase.json
+```
+
+A/B 对照（一次跑多档、同批题、每档独立数据根；离线档）：
+
+```bash
+HIPPOCAMPUS_OFFLINE=1 .venv/Scripts/python.exe scripts/bench_ab.py \
+  --data D:/tmp/hc-bench/locomo10.json --home-root D:/tmp/hc-bench/ab \
+  --convs 3 --limit 80 --home-scope model --reuse-import \
+  --variants "onnx:Xenova/bge-small-en-v1.5|instr=off,onnx:Xenova/bge-base-en-v1.5|instr=off,onnx:Xenova/gte-small|instr=off"
+```
+
+| 档 | 证据进上下文（80 题 A/B） | 说明 |
+|---|---|---|
+| `builtin-hash`（默认） | —（全量 36.7%） | 零下载、纯词法哈希；英文召回弱是它的**已知边界** |
+| `bge-small-en-v1.5`（384 维） | 33.8% | 全量 45.7%；p50 45.8 ms，比默认档更快 |
+| **`bge-base-en-v1.5`（768 维）** | **41.3%** | **全量 47.8%**；当前最高档（模型 415 MB，首次下载一次） |
+| `gte-small` | 27.5% | 池化按官方 mean（`_pooling_for`），本任务上更差 → 不推荐 |
+| `bge-small-en` + 官方英文查询指令 | 32.5% | 官方 s2p 用法在本任务上**无收益**（−1.3 pp，噪声级）且 +80 tokens → **不登记** |
+
+> 选档只有"跑 A/B"这一条路（模型大小／名气／官方建议都不算证据，本表两条否定结论就是这么来的）。
+> 池化方式按模型官方配置（bge＝CLS、gte＝mean）：拿错池化会得到"越换越差"的假结论。
+> 换档只影响**查询侧**吗？不是——文档侧向量也变，所以**换档必须重新导入**（A/B 脚本按数据根隔离）。
+
 ## 三、口径（写在表头上，别让读者猜）
 
 | 项 | 本项目怎么算 |
