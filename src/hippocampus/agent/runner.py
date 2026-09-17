@@ -22,7 +22,18 @@ EXITS = ("completed", "cannot_complete", "needs_human")
 #   ① 时间戳（本来就不影响"同输入同轨迹"的判断）；
 #   ② **本轮新生成的标识符**——新写入记忆的 id 是 uuid，两轮必然不同，但它不代表
 #      行为差异（"是否发生了固化"由 consolidated 计数体现，已有）。
-_TS_KEYS = ("ts", "elapsed_ms", "started_at", "finished_at", "consolidated_ids", "episode_id", "home")
+_TS_KEYS = (
+    "ts",
+    "elapsed_ms",
+    "started_at",
+    "finished_at",
+    "consolidated_ids",
+    "episode_id",
+    "home",
+    # A10：run_id 是"本次注入调用"的相关标识（时间戳+进程内序号），重跑必变，
+    # 与 ts 同理不参与复演指纹——轨迹里各步骤仍按 run_id 归位，但指纹只比行为。
+    "run_id",
+)
 
 
 @dataclass

@@ -51,20 +51,21 @@ class AgentState(TypedDict, total=False):
 
 def _memory_lines(
     core: MemoryCore, scope: Scope, query: str
-) -> tuple[list[str], list[str], list[dict[str, Any]], list[tuple[float, str]]]:
-    """检索 + 装配注入；返回（可读行, 注入 id, 被剔候选, [(分数, 通道)…]）。
+) -> tuple[list[str], list[str], list[dict[str, Any]], list[tuple[float, str]], str]:
+    """检索 + 装配注入；返回（可读行, 注入 id, 被剔候选, [(分数, 通道)…], run_id）。
 
     分数与**通道**一起回传：策略层的证据闸要区分"命中通道"——图通道是"顺带想起
     同实体的东西"（分数离散 0.5/0.3/0.15，且会话实体兜底会带上本会话的实体），
     它**不构成"回答了这个问题"的证据**（见 RulePolicy.floor 的说明）。
+    run_id（A10）：本次注入的语义链标识，写进轨迹供 explain 精确匹配审计事件。
     """
     injection = core.inject_finalize(scope, query)
     if not injection.enabled:
-        return [], [], [], []
+        return [], [], [], [], injection.run_id
     lines = [f"[{item.kind}] {item.content}" for item in injection.items]
     dropped = [{"id": d.id, "reason": d.reason, "score": round(d.score, 4)} for d in injection.dropped]
     scored = [(float(item.score), str(item.channel or "")) for item in injection.items]
-    return lines, list(injection.injected_ids), dropped, scored
+    return lines, list(injection.injected_ids), dropped, scored, injection.run_id
 
 
 _ABS_PATH_RE = re.compile(r"(?:[A-Za-z]:[\\/][^\s，。；、）)】]+)|(?:/(?:home|Users)/[^\s，。；、）)】]+)")
@@ -107,6 +108,7 @@ def build_graph(core: MemoryCore, scope: Scope, *, tools: ToolBox, policy: Any, 
                         "injected_ids": [],
                         "memory_lines": [],
                         "dropped": [],
+                        "run_id": "",
                         "policy": "confirmation",
                     }
                 )
@@ -117,7 +119,7 @@ def build_graph(core: MemoryCore, scope: Scope, *, tools: ToolBox, policy: Any, 
                     "injected_ids": [],
                     "confirmation": confirmation.text,
                 }
-        lines, injected, dropped, scored = _memory_lines(core, scope, task)
+        lines, injected, dropped, scored, run_id = _memory_lines(core, scope, task)
         decision: Decision = policy.decide(
             task,
             step=step,
@@ -136,6 +138,7 @@ def build_graph(core: MemoryCore, scope: Scope, *, tools: ToolBox, policy: Any, 
                 "injected_ids": injected,
                 "memory_lines": lines,
                 "dropped": dropped,
+                "run_id": run_id,
                 "policy": policy.name,
             }
         )
