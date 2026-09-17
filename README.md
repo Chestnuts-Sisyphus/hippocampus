@@ -1,145 +1,169 @@
-# Hippocampus
+# 🧠 Hippocampus
 
-> **跨会话记忆 agent** —— 一个记忆核心（`MemoryCore`），两种消费形态。
+> **Cross-session memory for agents** — one memory core (`MemoryCore`), two consumption forms
+> (a drop-in proxy and a LangGraph agent), measured on public benchmarks with official judging.
 
-Hippocampus 把"记忆"做成 agent 的核心能力，而不是外挂的检索库：
+Hippocampus treats memory as the **core capability of an agent**, not a bolt-on retrieval library:
+conversations land in a structured store, and every later request is answered against the *right*
+memories — retrieved, layered, and only then handed to the model.
 
-- **记忆核心**：四通道检索（语义／关键词／图谱／事件线索）＋ 相关性断崖截断 ＋ 预算装填；
-  stable／fluid 分层注入；**双轨（确认轨／非确认轨）**＋**观察轨**隔离（模型输出永不静默
-  注入）；冲突挂起人工确认；生命周期与离线固化；安全与漏抽守卫。每条记忆**可查看、可改、
-  可删、可追溯来源**。
-- **代理形态**：**三种入站格式**都接——OpenAI Chat Completions、OpenAI Responses、
-  Anthropic Messages（按请求体形状判定）；把 `base_url` 指过来就获得记忆：请求前注入、
-  响应后固化、冲突随回复回传确认块，回复按客户端**自己那套协议**返回。客户端不改一行代码。
-  详见 [docs/proxy.md](docs/proxy.md)（含格式矩阵与诚实边界）。
-- **Agent 形态**：LangGraph 编排（think／act／answer）＋ LangChain 工具接入；记忆机制全程
-  融入思考与行动：检索决定上下文 → 执行 → **按出口与依据判定取舍固化**；三出口（完成／
-  无法完成／需人工升级）；轨迹可复演。
-
-对外可插拔目前落地的是**模型端点**（OpenAI 兼容，可换上游）；**记忆后端**（SQLite＋Chroma）
-与**工具来源**的可插拔见 `docs/roadmap.md` 的路线图。工具来源当前是 Agent 形态内置的固定
-工具集（写文件／列目录／记记忆／查记忆／搜岗位），**未做 MCP 等第三方工具接入**——不承诺
-"含 MCP"。
+In-repo docs are written in Chinese (the project is target-language-agnostic; the core UI strings
+and docs are CN). Repo map and protocol details live under [`docs/`](#-documentation).
 
 ---
 
-## 快速开始
+## ✨ What it does
+
+| Capability | What you get |
+|---|---|
+| **Memory core** | 4-channel retrieval (semantic / keyword / graph / episode) + relevance-cliff truncation + budget packing; stable/fluid layered injection; **dual-track** (confirmed / non-confirmed) + **observation track** isolation — model outputs are *never* silently injected; conflicts are suspended for human confirmation; lifecycle & offline consolidation; safety and missed-extraction guards. Every memory is viewable, editable, deletable, and source-traceable. |
+| **Proxy form** | Accepts **three inbound formats** — OpenAI Chat Completions, OpenAI Responses, Anthropic Messages (sniffed from the request shape). Point your client's `base_url` at it and it gains memory: injection before requests, consolidation after responses, confirm blocks returned inside responses, replies in the *client's own protocol*. Zero client changes. Details & honest boundaries: [`docs/proxy.md`](docs/proxy.md). |
+| **Agent form** | LangGraph orchestration (think / act / answer) + LangChain tools. Memory is woven into reasoning: retrieval decides context → execution → consolidation gated on exit and evidence. Three exits (done / cannot / needs-human); replayable traces. |
+
+Plug-ins that exist today: **model endpoints** (OpenAI-compatible, swappable upstream). Memory
+backend (SQLite + Chroma) and tool sources are on the roadmap — **no MCP / third-party tool
+integration** is claimed or shipped.
+
+---
+
+## 🏆 Public benchmark results (measured, 2026-09-18)
+
+Official judging implemented as an explicit opt-in arm (`bench --model-arm`): the model answers
+from the memory layer's **injected context (top-8)** — not the full history — and judging follows
+the official repositories (pinned revisions, see `docs/benchmark.md` §2.3).
+
+| Benchmark | Official metric | Result (95% CI) | n |
+|---|---|---|---|
+| LongMemEval-oracle | LLM-judged accuracy (official judge prompts) | **70.5% (63.8%–76.4%, Wilson)** | 200 (sampled) |
+| LoCoMo-10 | Official F1 (Porter-stemmed token F1, official eval script) | **32.55% (30.8%–34.4%, bootstrap)** | 1986 (full) |
+
+Same-run retrieval metrics (evidence-in-context / answer-in-context): LongMemEval **100.0%** /
+48.5%; LoCoMo **45.5%** / 17.4% (with neural embedding `bge-small-en-v1.5`; default zero-download
+lexical tier: 36.7%).
+
+> **Honest footnotes (do not skip when citing):** the model arm uses `deepseek-chat` at
+> temperature 0, and its input is the memory layer's top-8 injected context, so these numbers are
+> **not directly comparable to full-context baselines** — published baselines are shown with
+> per-row footnotes in the results document. Official runs cost API tokens (¥30 budget guard
+> built in; every run records balance before/after).
+
+Performance (real-scale synthetic store: 1,154 memories / 2,406 entities / 6,035 relations /
+497 episodes): 4-channel retrieval p50 **43.7 ms** / p95 55.1 ms; injection assembly p50
+106.8 ms; single write p50 632.8 ms (full index sync — known bottleneck, see `docs/roadmap.md`).
+
+Full numbers, category breakdowns, CI methods, costs, and repro commands:
+`docs/benchmark.md` + `docs/roadmap.md`.
+
+---
+
+## 🚀 Quick start
 
 ```bash
-# 安装（三选一；尚未发布 PyPI，所以前两条是现在能用的路径）
+# Install (three options; not on PyPI yet, so these are the live paths)
 pip install "hippocampus-agent[vector,proxy] @ git+https://github.com/Chestnuts-Sisyphus/hippocampus"
-#   或：把源码目录拷到本机后  pip install -e "/path/to/hippocampus[vector,proxy]"
-#   或（不装，只跑）：          PYTHONPATH=/path/to/hippocampus/src python -m hippocampus.cli doctor
+#   or: copy the source tree and  pip install -e "/path/to/hippocampus[vector,proxy]"
+#   or (no install, just run): PYTHONPATH=/path/to/hippocampus/src python -m hippocampus.cli doctor
 
-hippocampus doctor                     # 体检：数据根／端口／锁／索引／嵌入档
-hippocampus seed                       # 灌入示例数据（含已知真值：事实／冲突对／过期项）
-hippocampus demo --memories            # 一键跑评测题 + 记忆开/关对照
+hippocampus doctor                     # health check: data root / port / locks / index / embedding tier
+hippocampus seed                       # load sample data (known ground truth: facts, conflicts, stale items)
+hippocampus demo --memories            # one-command eval + memory on/off comparison
 ```
 
-> 项目名是 **Hippocampus**，CLI 与 import 包名同样是 `hippocampus`，仓库也是 `…/hippocampus`；
-> 只有 **PyPI 分发名**（`pip install` / `pip show` 里那一串）是 `hippocampus-agent`——
-> 裸名 `hippocampus` 在 PyPI 上属于第三方（同名 memoization 包），
-> 那样写会让 `pip install hippocampus` 装错东西。实测记录见 [docs/naming.md](docs/naming.md)。
+> **Naming note.** The project, CLI and import package are all `hippocampus`; only the **PyPI
+> distribution name** is `hippocampus-agent` — the bare name `hippocampus` on PyPI belongs to a
+> third-party memoization package, and installing by the bare name would fetch the wrong thing.
 
-> 两条路径都实测过：**无 git 环境**（把源码树拷过去 + `pip install --offline -e .`）
-> 与**无网**（不装 `[vector]`：语义通道降级、其余通道照常，`doctor` 会明说）。
-> 只装核心（不带 `[vector]`）时检索走词法通道，功能不丢、召回弱一些——
-> 这条降级路径在 CI 里是一个独立任务（`core-only`）。
-
-`demo` 的实测输出（本机 2026-09-17，离线档、无凭据、示例数据）：
+Measured demo output (2026-09-17, offline tier, no credentials, synthetic data):
 
 ```
-[记忆开] 通过 10/10（成功率 100%，平均 2.0 步）
-[记忆关] 通过 3/10（成功率 30%，平均 2.0 步）
-     失败分类：检索未召回 7
-[标签双来源] 一致率 100%（9 题可比）
-边界声明：本表为最小版评测——题量 10（7 问 3 动作）、单模型端点、单轮次；
-        离线档作答器为规则作答器（不是模型推理）；样本是合成数据，
-        只证方法可复现，效果结论不作普适承诺。
+[memory on]  10/10   (100%, avg 2.0 steps)
+[memory off]  3/10   (30%,  avg 2.0 steps)
+      failures: retrieval miss 7
+[dual-source labels] 100% agreement (9 comparable)
+Boundary: minimal evalset — 10 questions (7 QA / 3 actions), single endpoint, single round;
+          offline answerer is a rule-based one (not model reasoning); synthetic sample data —
+          reproducible method, no general claims of quality.
 ```
 
-> 数字口径：10 题、7 问 3 动作、两次对照；**合成示例数据**，不是真实用户数据。
-> 换机复跑同法：`hippocampus seed && hippocampus demo --memories`。
-
-代理形态：
+Proxy form:
 
 ```bash
 hippocampus proxy --port 8765
-# 首次启动会生成实例令牌（<数据根>/instance_token；`hippocampus doctor` 显示前 8 位）：
-#   客户端请求带  Authorization: Bearer <完整令牌>，未带令牌回 401
-# 然后把客户端的 base_url 改成 http://127.0.0.1:8765
-#    OpenAI Chat：/v1/chat/completions   Responses：/v1/responses   Anthropic：/v1/messages
-# stream:true 时上游 SSE 逐行转发（真流式）；上游非 2xx 原样透传状态码与错误体
+# first start generates an instance token (<data root>/instance_token; doctor shows first 8 chars)
+#   clients send  Authorization: Bearer <full token>  (401 without)
+# point your client's base_url at http://127.0.0.1:8765
+#   OpenAI Chat: /v1/chat/completions   Responses: /v1/responses   Anthropic: /v1/messages
+# stream:true is forwarded SSE line-by-line (true streaming); upstream non-2xx passes through verbatim
 ```
 
-Agent 形态：
+Agent form:
 
 ```bash
-hippocampus chat "帮我挑 5 个适合我的岗位"      # 需要配置模型端点
-hippocampus chat --offline "记住：我不看外包"   # 无 key／无网也能跑记忆纪律
+hippocampus chat "挑 5 个适合我的岗位"      # requires a configured model endpoint
+hippocampus chat --offline "记住：我不看外包"  # memory discipline works without a key / offline
 ```
 
-## 模型端点与凭据
+---
 
-**凭据只从环境变量或系统密钥服务读取，不写进任何文件**（源码、示例、配置、测试都不含
-可用凭据字面量）：
+## 🏗️ Architecture
 
-```bash
-export HIPPOCAMPUS_API_KEY=...        # 或 DEEPSEEK_API_KEY / OPENAI_API_KEY
-export HIPPOCAMPUS_BASE_URL=https://api.deepseek.com   # 可选，也可写在 config.json
-```
+| Layer | Form | Entry point |
+|---|---|---|
+| Memory core | `MemoryCore` (SQLite + Chroma + BM25, 4-channel retrieval) | `hippocampus.core` |
+| Proxy | OpenAI-compatible proxy (`/v1/chat/completions`, `/v1/responses`, `/v1/messages`) | `hippocampus proxy` |
+| Agent | LangGraph graph (think / act / answer) | `hippocampus chat` |
 
-配置文件（`<数据根>/config.json`）只放非敏感项；出现疑似凭据字段会被**拒绝加载**。
-详见 [docs/security.md](docs/security.md)。
+Guards are wired at every layer: outbound URLs are validated (no localhost/private/reserved by
+default), credentials come from environment or keyring only (zero literals in source/tests),
+memory writes are safe-ident/safe-DDL checked, and offline mode means *no outbound requests, period*
+— benchmarks default to offline unless `--model-arm` is explicitly passed.
 
-## 离线档
+---
 
-无 key、无网、无 git 也能跑（CI 每次 push 都跑这一档）：
+## 🧪 Tests & CI
 
-- 显式记忆（`记住 X` / `忘掉 X`）、检索与注入、冲突挂起与确认、生命周期判定、
-  注入过滤与开关——**全部规则化可用**；
-- 嵌入默认**内置档（零下载）**；
-- 需要模型才能做的事（从自由文本里自动抽取记忆、多步 agent 推理）在离线档下不提供。
+- **421 pytest tests** (3 xfailed) — memory core, both forms, guards, embedding tiers, public-bench
+  adapters, official judging arm; all offline-runnable (`pytest --basetemp=D:/tmp/pt`).
+- Demo eval runs in CI with **threshold assertions** (memory on ≥9/10, memory off ≤6/10) — score
+  regressions turn the pipeline red.
+- Static checks: `check_interface` (v1 contract append-only), `audit_deps`, `scan_credentials`
+  (zero credential literals over 141 files), `scan_personal_data`, `ruff`.
 
-## 验证自己跑一遍
+---
 
-```bash
-python -m pytest tests/ -q            # 334 条（含随迁的记忆层测试；C 盘紧张时加 --basetemp=D:/tmp/pt）
-python scripts/check_interface.py     # MemoryCore v1 契约（scope 第一参数／无 HTTP 字段／只追加）
-python scripts/audit_deps.py          # 依赖审计：全局单例残留必须为 0
-python scripts/scan_credentials.py    # 凭据扫描：零命中
-python scripts/scan_personal_data.py --home <示例库根>   # 示例库无个人数据
-python scripts/calibrate.py           # 阈值标定（打印分数分布与建议证据线）
-```
+## 📚 Documentation
 
-CI（GitHub Actions）跑的就是上面这一串，**全程无 key、无网**（离线档），
-Windows 与 Linux 双平台。
+| Doc | What it covers |
+|---|---|
+| [`docs/benchmark.md`](docs/benchmark.md) | Public-benchmark protocol: pinned dataset revisions (sha256), retrieval/official judging arms, repro commands |
+| [`docs/roadmap.md`](docs/roadmap.md) | Known limitations, honest boundaries, improvement roadmap |
+| [`docs/proxy.md`](docs/proxy.md) | Proxy form: format matrix, auth, streaming, honest boundaries |
+| [`docs/memory-core-v1.md`](docs/memory-core-v1.md) | `MemoryCore` v1 interface contract (append-only) |
+| [`docs/security.md`](docs/security.md) | Threat model, outbound URL rules, credential handling |
+| [`docs/embedding.md`](docs/embedding.md) | Embedding tiers, which to choose (with measurements), pooling per model |
+| [`docs/offline.md`](docs/offline.md) | Offline tier: what works without a network/credentials |
+| [`docs/naming.md`](docs/naming.md) | Naming decisions (PyPI name, terminology) |
+| [`docs/forms-parity.md`](docs/forms-parity.md) | Feature parity across the two forms |
+| [`docs/verification-design.md`](docs/verification-design.md) | Verification methodology for eval topics |
 
-## 工程约定
+---
 
-- 记忆库是**单写者**的：同一库目录同时只有一个进程可写，第二个写者排队或被告知
-  （僵尸锁可回收，`hippocampus doctor` 可查锁状态）。
-- 出站 URL：由数据或模型提供的地址仅允许 http／https，且拒绝环回／私有／保留地址。
-- 记忆只增不删：修改走 **supersede**（旧条保留、可追溯），删除走归档。
+## 📜 Status & limitations (honest)
 
-## 目录结构
+What works today: two production-shaped consumption forms, real retrieval pipeline, public
+benchmarks with official judging, performance at real-store scale, and CI-enforced regression
+thresholds. What is *not* there — so nobody reads more into the repo than it delivers:
 
-```
-src/hippocampus/
-  core/      记忆核心门面（MemoryCore v1 冻结接口 + 单写者锁）
-  memory/    记忆层实现（四通道检索／生命周期／守卫／安全／离线固化）
-  proxy/     代理形态（OpenAI 兼容端点）
-  agent/     Agent 形态（LangGraph 三节点 + 工具 + 轨迹）
-  eval/      评测（题目集／判分／开关对照）
-  cli.py     命令行
-tests/       随迁测试 + 本项目测试
-docs/        接口冻结文档／命名实测／依赖审计／安全说明
-```
+- **No MCP / third-party tool integration** (by design; the design doc says so).
+- **No `/run` `/trace` `/health` service** (roadmap item; proxy form covers the OpenAI-compatible path).
+- **Session cache is unbounded** — ~4 GB resident at 200 accounts on LongMemEval-style one-account-per-question runs (single-user, single-session is unaffected; LRU eviction is planned).
+- **Single `write` triggers a full index sync** — p50 632.8 ms (~1.5 writes/s) at 1,154-memory scale; incremental upsert is the planned fix.
+- **English corpus × CN-tuned tokenizer/thresholds** — absolute retrieval scores on English benchmarks are lower than an EN-tuned system would score (documented per-benchmark).
+- **Official judging costs API tokens** and is an explicit opt-in flag; every run prints call counts, estimated cost, and balance before/after (¥30 budget hard-stop).
+- **Naming**: PyPI distribution name is `hippocampus-agent` (see above).
 
-## 状态
+---
 
-项目处于 alpha：接口 v1 已冻结（只追加字段）。尚未发布的形态见 `CHANGELOG.md`。
+## 📝 License
 
-## 许可
-
-MIT，见 [LICENSE](LICENSE)。
+MIT

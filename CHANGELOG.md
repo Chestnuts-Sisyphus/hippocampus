@@ -3,6 +3,37 @@
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)；
 `MemoryCore` 接口自 v1 起**只允许追加字段**（见 `docs/memory-core-v1.md`）。
 
+## [0.2.2] — 2026-09-18
+
+第四个版本：**官方判分臂**。README 转英文（GitHub 主页对齐 GitTok/Infinigrow 包装方式）；
+公开基准的**官方口径**（模型作答 + LLM 判分）落地为显式开关 `bench --model-arm`，
+两个基准的官方分已实测（LongMemEval-oracle 抽 200：判分准确率 **70.5%**，
+CI 63.8–76.4%；LoCoMo-10 全量 1986：官方 F1 **32.55%**，CI 30.8–34.4%）。
+**接口仍为 v1（只追加）**。
+
+### 新增
+
+- **官方判分臂**（`src/hippocampus/eval/model_arm.py`）：模型作答（deepseek-chat, temperature 0）
+  基于记忆层注入上下文（top-8，非全文）＋ 官方判分——LongMemEval 官方 judge prompt
+  （`xiaowu0162/LongMemEval @9e0b455`）、LoCoMo 官方判分算法（`snap-research/locomo @3eb6f2c`，
+  与官方 evaluation.py 逐题对拍一致）；显式 `--model-arm` 才出站，离线默认零变化。
+- **调用链护栏**：并发 16、失败重试 2、单调用超时 120 s、按 usage 估算花费累计 **¥30 预算
+  硬停**、跑前/跑后各查一次余额（零成本）；每次调用计数 + 估算花费打印。
+- **CLI 参数**：`bench --model-arm`、`--budget-yuan`、`--concurrency`、`--retries`、`--timeout-s`；
+  修 `bench --online` 未把 `allow_online` 传给运行层的旧 bug。
+- **测试**：模型臂 21 条用例（判分保真/护栏/预算硬停/失败如实上报/离线零变化），
+  全量 421 passed。
+
+### 资料
+
+- 基准结果正本（数字 + CI + 花费 + 复跑命令）：`投递/Hippocampus-基准评测结果-20260917.md`（v2）；
+  官方判分协议：`docs/benchmark.md` §二·三。
+
+### 已知限制（新增部分，完整清单见 docs/roadmap.md）
+
+- 官方分是**单模型单次测量**（deepseek-chat）；答辩引用必须带"top-8 注入、非全文"脚注。
+- LoCoMo 官方 F1 32.55% 与全文基线（GPT-3.5-16k 37.8）同表比时必须带口径注记。
+
 ## [0.2.1] — 2026-09-17
 
 第三个版本：**二轮缺口清单 N11–N20**。主题＝"承诺与实现对齐"——把正本新口径落到实现与文档，
