@@ -214,6 +214,14 @@ def tokenize(text: str) -> list[str]:
 # ---------- 向量通道（Chroma，双池） ----------
 
 
+# [HIPPO] embedding 函数按模型名进程级 memo（与 `_get_embed_fn` 同源纪律）。
+# 必须 memo 的理由（实测）：ONNX 档每实例化一次就多一份 onnxruntime InferenceSession
+# （每份数十 MB 常驻）；"一题一账号"的基准（LongMemEval 200 题）会新建 200 个 MemorySession，
+# 不 memo 就在第 N 个账号加载模型时被 onnxruntime 的 Rust 侧 `memory allocation failed`
+# 直接炸掉进程（异常都 catch 不到）。Chroma 侧只按 EF 的名字做校验，共享同一个实例安全。
+_EF_BY_MODEL: dict[str, object] = {}
+
+
 def _resolve_embedding_function(model: str):
     """按配置模型名解析 chromadb embedding_function（任务书 8c 任务 2 + P02 任务 1）。
 
@@ -223,13 +231,22 @@ def _resolve_embedding_function(model: str):
       （默认短路 None / 内置同名查找 / 未知 warning + 回退默认不崩）
     - "onnx:<HF 名>" → ONNX 加载器（本地推理，懒加载，失败回退默认不崩）
     - "sentence_transformer:<HF 名>" → stderr 提示缺依赖 + 回退默认
+
+    结果按模型名 memo（切换配置走 `invalidate_embedding_cache` 清空）。
     """
+    key = model or ""
+    if key in _EF_BY_MODEL:
+        return _EF_BY_MODEL[key]
+
     from hippocampus.memory.builtin_embedding import MODEL_NAME, BuiltinHashEmbeddingFunction
     from hippocampus.memory.embedding_models import resolve
 
     if not model or model == MODEL_NAME:
-        return BuiltinHashEmbeddingFunction()  # [HIPPO] 默认档：零下载
-    return resolve(model)
+        fn = BuiltinHashEmbeddingFunction()  # [HIPPO] 默认档：零下载
+    else:
+        fn = resolve(model)
+    _EF_BY_MODEL[key] = fn
+    return fn
 
 
 def get_collection(name: str | None = None):
@@ -590,6 +607,7 @@ def invalidate_embedding_cache() -> None:
     # [HIPPO] 复位缓存（与上方模块级声明同源；供依赖审计识别）
     _EMB_FN = None
     _EMB_FN_MODEL = None
+    _EF_BY_MODEL.clear()  # 模型 memo 一并清空（否则切换配置仍拿旧 EF 实例）
     _query_embedding_cached.cache_clear()
 
 

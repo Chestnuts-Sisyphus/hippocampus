@@ -50,6 +50,7 @@ def _clean_embedding_cache():
 
     rt._EMB_FN = None  # noqa: SLF001
     rt._EMB_FN_MODEL = None  # noqa: SLF001
+    rt._EF_BY_MODEL.clear()  # noqa: SLF001
     try:
         rt._query_embedding_cached.cache_clear()
     except AttributeError:
@@ -57,6 +58,7 @@ def _clean_embedding_cache():
     yield
     rt._EMB_FN = None  # noqa: SLF001
     rt._EMB_FN_MODEL = None  # noqa: SLF001
+    rt._EF_BY_MODEL.clear()  # noqa: SLF001
     try:
         rt._query_embedding_cached.cache_clear()
     except AttributeError:

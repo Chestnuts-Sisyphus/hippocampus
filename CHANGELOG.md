@@ -22,6 +22,11 @@
   报命中条数（空命中按"没依据"走三出口）。
 - **观察轨在生产路径上没有调用点**：`extract_response`（模型输出→`shadow=1`）只有随迁测试在调；
   现接进 `consolidate` 的 `assistant_text` 分支（两形态共用），`TurnResult.observed_ids` 留证。
+- **神经嵌入档在"多账户"下把进程打爆**：`_resolve_embedding_function` 每次调用都新建一份
+  ONNX `InferenceSession`（每份数十 MB 常驻），而 `MemorySession.__init__` 每账户调一次——
+  LongMemEval 一题一账户（200 个）跑到中途被 onnxruntime 的 Rust 侧
+  `memory allocation of 2097152 bytes failed` 直接杀进程（异常 catch 不到）。
+  现按模型名进程级 memo（切换配置走 `invalidate_embedding_cache` 清空），200 个账户只加载一份模型。
 
 ### 新增
 
