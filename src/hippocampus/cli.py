@@ -76,8 +76,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     print(f"  写锁          {lock_state}  {status['path']}")
 
     stats = core.stats(scope)
-    print(f"  索引          memories {stats['memories']} / entities {stats['entities']} / "
-          f"episodes {stats['episodes']} / relations {stats['relations']}")
+    print(
+        f"  索引          memories {stats['memories']} / entities {stats['entities']} / "
+        f"episodes {stats['episodes']} / relations {stats['relations']}"
+    )
     print(f"  待确认        pending {stats['pending']} / candidates {stats['candidates']}")
 
     # 索引健康（B5）：chroma 可写性 + 集合条数 vs 库内 active 条数 + 同步错误
@@ -120,8 +122,10 @@ def cmd_doctor(args: argparse.Namespace) -> int:
 
     token = instance_token()
     if token:
-        print(f"  实例令牌      已启用（前 8 位 {token[:8]}…，完整令牌见 <数据根>/instance_token；"
-              "代理请求带 `Authorization: Bearer <令牌>`）")
+        print(
+            f"  实例令牌      已启用（前 8 位 {token[:8]}…，完整令牌见 <数据根>/instance_token；"
+            "代理请求带 `Authorization: Bearer <令牌>`）"
+        )
     else:
         print("  实例令牌      未启用（`hippocampus proxy` 首次启动会自动生成）")
 
@@ -233,7 +237,9 @@ def cmd_explain(args: argparse.Namespace) -> int:
     audit_path = Path(args.audit) if getattr(args, "audit", None) else default_audit_path(data)
     audit_events = audit_mod.load_events(audit_path)
     observe_events = audit_mod.load_events(
-        Path(data.get("home") or ".") / "accounts" / ((data.get("scope") or {}).get("account") or "default")
+        Path(data.get("home") or ".")
+        / "accounts"
+        / ((data.get("scope") or {}).get("account") or "default")
         / "observe.jsonl"
     )
     if args.step:
@@ -371,7 +377,7 @@ def _bench_home(name: str) -> str:
 
 
 def cmd_bench(args: argparse.Namespace) -> int:
-    """公开基准评测（LoCoMo／LongMemEval）：离线档检索/词面口径，非官方分。"""
+    """公开基准评测（LoCoMo／LongMemEval）：默认离线检索/词面口径；--model-arm 接官方判分臂。"""
     from hippocampus.eval import public_bench
 
     data = Path(args.data)
@@ -380,13 +386,16 @@ def cmd_bench(args: argparse.Namespace) -> int:
         print("  下载：见 docs/benchmark.md §一（钉版本的 curl 命令 + sha256 校验）", file=sys.stderr)
         return 2
     home = args.home or _bench_home(args.name)
-    # 基准默认钉离线档：不发出站请求（跑模型臂要显式 --online）。
+    # 基准默认钉离线档：不发出站请求（跑模型臂要显式 --online / --model-arm）。
     # 教训：曾在"环境里有 key"时跑基准，维护链对模型端点发了 205 次请求（全 401）——
     # 既不可复现，也可能烧用户的钱。默认关掉是纪律，不是可选项。
-    if not args.online:
+    if not (args.online or args.model_arm):
         os.environ["HIPPOCAMPUS_OFFLINE"] = "1"
     print(f"数据根：{home}（基准库与用户记忆库隔离）")
-    print(f"档位：{'离线档（无出站请求）' if not args.online else '在线（会使用环境里的模型端点与凭据）'}")
+    print(
+        f"档位：{'离线档（无出站请求）' if not (args.online or args.model_arm) else '在线（会使用环境里的模型端点与凭据）'}"
+        + (f"；模型臂已开（官方判分，预算 ¥{args.budget_yuan:.1f} 硬停）" if args.model_arm else "")
+    )
     report = public_bench.run(
         bench=args.name,
         data=data,
@@ -398,6 +407,12 @@ def cmd_bench(args: argparse.Namespace) -> int:
         inject_max_items=args.inject_max_items,
         shadow_log=args.shadow_log,
         split_pools=not args.dup_pools,
+        allow_online=bool(args.online or args.model_arm),  # --online/--model-arm 都表示"允许出站"
+        model_arm=args.model_arm,
+        budget_yuan=args.budget_yuan,
+        concurrency=args.concurrency,
+        retries=args.retries,
+        timeout_s=args.timeout_s,
     )
     print()
     print(public_bench.render(report))
@@ -439,8 +454,9 @@ def cmd_export(args: argparse.Namespace) -> int:
     scope = _scope(args)
     manifest = export_package(core, scope, args.target)
     print(f"已导出 → {Path(args.target).resolve()}")
-    print(f"  schema 版本 {manifest['schema_version']}／应用版本 {manifest['app_version']}／"
-          f"scope {manifest['account']}")
+    print(
+        f"  schema 版本 {manifest['schema_version']}／应用版本 {manifest['app_version']}／scope {manifest['account']}"
+    )
     print(f"  库内计数 {manifest['counts']}")
     print("  （导出的是源真相 memory.db；向量索引在导入端重建）")
     core.close()
@@ -565,6 +581,13 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--inject-max-items", type=int, help="消融：覆盖注入条数上限（默认 8）")
     p.add_argument("--shadow-log", action="store_true", help="保留逐题 shadow 调试行（默认关）")
     p.add_argument("--online", action="store_true", help="允许走模型端点（默认离线档；会用到环境里的凭据）")
+    p.add_argument(
+        "--model-arm", action="store_true", help="官方判分臂：模型作答 + LME LLM 判分（需端点与凭据；预算硬停）"
+    )
+    p.add_argument("--budget-yuan", type=float, default=30.0, help="模型臂预算硬停（默认 30 元，按估算花费计）")
+    p.add_argument("--concurrency", type=int, default=16, help="模型臂并发数（默认 16）")
+    p.add_argument("--retries", type=int, default=2, help="模型臂失败重试次数（默认 2）")
+    p.add_argument("--timeout-s", type=float, default=120.0, help="模型臂单调用超时秒数（默认 120）")
     p.add_argument("--dup-pools", action="store_true", help="消融：每轮两处都落（旧口径，同句占两个注入位）")
     p.set_defaults(func=cmd_bench)
 
