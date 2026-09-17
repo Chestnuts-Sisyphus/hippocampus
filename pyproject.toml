@@ -36,6 +36,8 @@ dependencies = [
 [project.optional-dependencies]
 # 向量索引（四通道检索的语义通道）。缺省安装下语义通道降级为纯词法，其余通道不受影响。
 vector = ["chromadb>=0.5"]
+# 官方判分臂（bench --model-arm）：LoCoMo 官方 F1 的 Porter 词干（nltk）
+eval = ["nltk>=3.8"]
 # 代理形态：OpenAI 兼容端点
 proxy = ["fastapi>=0.110", "uvicorn>=0.27"]
 # Agent 形态：LangGraph 编排 + LangChain 工具
