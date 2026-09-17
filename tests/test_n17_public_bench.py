@@ -151,7 +151,7 @@ def test_bench_requires_offline(tmp_path, monkeypatch):
 
 
 def test_render_has_boundary_note(core):
-    """结果表必须自带口径声明（离线档／非官方分），不让读者自己猜。"""
+    """结果表必须自带口径声明（检索/词面口径、官方分需显式开关），不让读者自己猜。"""
     item = pb.Item(
         qid="q1",
         question="Where do I live?",
@@ -163,7 +163,7 @@ def test_render_has_boundary_note(core):
     )
     report = pb.run_items(core, [item], account_prefix="t-render")
     text = pb.render(report)
-    assert "离线档实测" in text and "非官方分" in text
+    assert "检索/词面口径" in text and "官方分" in text
     assert "总体" in text
 
 
