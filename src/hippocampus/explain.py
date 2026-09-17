@@ -41,13 +41,21 @@ def _fmt_dropped(dropped: list[dict[str, Any]]) -> str:
 
 
 def _match_audit_events(step: dict[str, Any], audit_events: list[dict[str, Any]], task: str) -> list[dict[str, Any]]:
-    """找出与某一步相关的审计事件：注入 id 有交集，或 query 与任务文本一致。
+    """找出与某一步相关的审计事件。
 
-    一个 run 的多步共享同一任务 query，所以同一批事件可能匹配多步——
-    这没问题：审计记录的是"这一次检索的候选全集"，同一查询的答案一致。
+    优先按 **run_id 精确归位**（A10）：轨迹步与审计事件都带同一注入调用生成的
+    run_id，同一个 query 的多次注入不会串步。
+    旧事件/旧轨迹没有 run_id 时退回启发式：注入 id 有交集，或 query 与任务文本一致。
+    启发式下同一个 run 的多步共享同一任务 query，同一批事件可能匹配多步——
+    这是审计的固有语义（同一查询的候选集一致），不是错配。
     """
     if not audit_events:
         return []
+    step_run_id = str(step.get("run_id") or "")
+    if step_run_id:
+        exact = [ev for ev in audit_events if ev.get("run_id") == step_run_id]
+        if exact:
+            return exact
     step_ids = set(step.get("injected_ids") or [])
     out: list[dict[str, Any]] = []
     for ev in audit_events:

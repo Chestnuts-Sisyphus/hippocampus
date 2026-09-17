@@ -40,11 +40,14 @@ def record_retrieval(
     query: str,
     candidates: list[dict[str, Any]],
     injected_ids: list[str],
+    run_id: str = "",
 ) -> None:
     """记录一次注入检索的候选全集。
 
     candidates 顺序即排名顺序；`injected` 标记本次实际注入；`dropped`＋`reason`
     给出被剔候选的理由。超过 TOP_N 的候选只计入 `capped` 计数，不落盘。
+    `run_id`（A10）：调用方注入装配时生成的语义链标识，explain 按它精确归位——
+    同一 query 多处调用时不会串步（空串=旧版事件，explain 走启发式兜底）。
     """
     top = candidates[:TOP_N]
     _append(
@@ -57,6 +60,7 @@ def record_retrieval(
             "injected_ids": injected_ids[:50],
             "total_candidates": len(candidates),
             "capped": max(0, len(candidates) - TOP_N),
+            "run_id": (run_id or "")[:64],
         },
     )
 
