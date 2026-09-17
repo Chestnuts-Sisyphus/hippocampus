@@ -3,7 +3,11 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-name = "hippocampus-agent"
+# 项目名是 **Hippocampus**；这里的分发名（distribution name）另取 `hippocampus-memory`，
+# 原因是 PyPI 上的 `hippocampus` 已被第三方占用（Pascal Jürgens 的 sqlite memoization 包，
+# 见 docs/naming.md 的实测记录）。分发名只在 `pip install` / `pip show` 里出现，
+# 项目名、CLI（`hippocampus`）、import 包名（`hippocampus`）、仓库名都还是 Hippocampus。
+name = "hippocampus-memory"
 version = "0.1.0"
 description = "以记忆为核心的 agent 运行时：记忆核心 + 代理形态 + Agent 形态"
 readme = "README.md"
@@ -48,9 +52,9 @@ dev = ["pytest>=8.0", "ruff>=0.6"]
 hippocampus = "hippocampus.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/Chestnuts-Sisyphus/hippocampus-agent"
-Repository = "https://github.com/Chestnuts-Sisyphus/hippocampus-agent"
-Issues = "https://github.com/Chestnuts-Sisyphus/hippocampus-agent/issues"
+Homepage = "https://github.com/Chestnuts-Sisyphus/hippocampus"
+Repository = "https://github.com/Chestnuts-Sisyphus/hippocampus"
+Issues = "https://github.com/Chestnuts-Sisyphus/hippocampus/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/hippocampus"]

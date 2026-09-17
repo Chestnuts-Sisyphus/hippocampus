@@ -148,7 +148,7 @@ class MemorySession:
             # 词法降级：没有向量库也能用（BM25／图／事件线索 + 完全去重）
             sys.stderr.write(
                 "[memory] 未安装 chromadb（可选依赖）：语义通道关闭，其余通道照常"
-                "（pip install 'hippocampus-agent[vector]' 可启用向量检索）\n"
+                "（pip install 'hippocampus-memory[vector]' 可启用向量检索）\n"
             )
             self._client = None
             self.collections: dict[str, Any] = {"mem": None, "ep": None}

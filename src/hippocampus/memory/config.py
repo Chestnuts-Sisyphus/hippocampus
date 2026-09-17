@@ -119,7 +119,7 @@ def resolve_api_key(env: dict | None = None) -> str:
     """**唯一的凭据入口**：环境变量／密钥服务。绝不读配置文件、绝不落盘。
 
     通道一：环境变量（`HIPPOCAMPUS_API_KEY` / `DEEPSEEK_API_KEY` / `OPENAI_API_KEY`）。
-    通道二：操作系统密钥服务（`keyring` 库，可选依赖；服务名固定 `hippocampus-agent`，
+    通道二：操作系统密钥服务（`keyring` 库，可选依赖；服务名固定 `hippocampus-memory`，
     账户名 `default`）。两条通道都是**进程内 API 读取**：不起子进程、不落副本。
     """
     source = os.environ if env is None else env
@@ -137,7 +137,7 @@ def _read_from_keyring() -> str:
     except ImportError:
         return ""
     try:
-        return (keyring.get_password("hippocampus-agent", "default") or "").strip()
+        return (keyring.get_password("hippocampus-memory", "default") or "").strip()
     except Exception:
         return ""
 
