@@ -73,6 +73,23 @@ def llm_chat_messages(messages: list[dict[str, Any]], **kwargs: Any) -> dict[str
     return llm.chat_messages(messages, **kwargs)
 
 
+def llm_post_json(payload: dict[str, Any], *, endpoint: str, timeout_s: float | None = None) -> tuple[int, dict]:
+    """把构造好的请求体原样转发到上游（代理形态的三端点转发通道）。
+
+    凭据不出记忆层：本函数只转发，调用方拿不到也不需要拿 key。
+    """
+    from hippocampus.memory import llm
+
+    return llm.post_json(payload, endpoint=endpoint, timeout_s=timeout_s)
+
+
+def upstream_endpoint() -> str:
+    """配置里的上游端点类型：chat / anthropic / responses。"""
+    from hippocampus.memory import llm
+
+    return llm.endpoint_mode()
+
+
 def validate_scope_id(account_id: str | None) -> str:
     """校验 scope 标识（目录穿越防护）。形态层的入口用它挡外部输入。"""
     from hippocampus.memory.account import safe_account_id
@@ -85,6 +102,8 @@ __all__ = [
     "agent_config",
     "llm_chat_json",
     "llm_chat_messages",
+    "llm_post_json",
+    "upstream_endpoint",
     "tier_params",
     "embedding_config",
     "endpoint_model",

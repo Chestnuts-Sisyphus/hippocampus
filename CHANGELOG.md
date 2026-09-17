@@ -13,8 +13,11 @@
 - **`MemoryCore` v1 冻结接口**：`write` / `search` / `inject_finalize` / `confirm` /
   `consolidate`（scope 为第一参数；不含任何 HTTP 概念；只允许追加字段）。
   自动检查：`scripts/check_interface.py`。
-- **代理形态**：OpenAI 兼容端点（默认 `127.0.0.1:8765`）——任何兼容客户端改 `base_url`
-  即获得记忆。确认块由**记忆层生成、代理追加**（可关，`确认 n`／`否决` 在入口消费）。
+- **代理形态：三种入站格式**（默认 `127.0.0.1:8765`）——OpenAI Chat Completions、
+  OpenAI Responses、Anthropic Messages，按请求体形状判定，回复按客户端自己那套协议返回；
+  上游格式由配置 `llm.api_mode` 决定（chat／anthropic／responses）。确认块由**记忆层生成、
+  代理追加**（可关，`确认 n`／`否决` 在入口消费）。不支持的组合如实回 501。
+  格式矩阵与已知边界见 `docs/proxy.md`。
 - **Agent 形态**：LangGraph 三节点（think / act / answer）＋ LangChain 工具接入；
   三出口（完成／无法完成／需人工升级）；轨迹可复演（`replay` 两次指纹一致）。
 - **命令行**：`doctor` / `seed` / `demo` / `proxy` / `chat` / `replay` / `explain` /
@@ -50,6 +53,9 @@
 - 数据根与 scope 解析改为显式注入（前身为模块级全局单例，多 scope 并行会串库）。
 
 ### 已知限制
+
+- 代理流的转发是**单 delta**（协议正确、无逐字效果）；上游逐行流式转发尚未实现。
+- 代理**未做鉴权**（默认只监听 127.0.0.1）；实例令牌尚未移植。
 
 - **并发写不保证**：同一记忆库目录同时只有一个写者（第二个排队或被告知）。
 - 内置嵌入档是**词法级**表征，同义改写召回弱于神经档；边界写在 `docs/embedding.md`。

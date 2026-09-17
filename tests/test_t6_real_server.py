@@ -56,9 +56,13 @@ def test_real_uvicorn_serves_and_injects(core, scope):
     seed(core, scope)
     captured: dict[str, object] = {}
 
-    def upstream(messages, *, model="", stream=False, body=None):
-        captured["messages"] = messages
-        return "上游的回复正文", {"total_tokens": 7}
+    def upstream(payload, *, model="", endpoint="chat", stream=False, body=None):
+        # 转发函数的契约：收"已转换好的上游请求体"（chat 入站 → chat 上游＝原样），
+        # 返回 (上游响应体 dict, usage)
+        captured["payload"] = payload
+        captured["endpoint"] = endpoint
+        return {"choices": [{"message": {"role": "assistant", "content": "上游的回复正文"}}],
+                "usage": {"total_tokens": 7}}, {"total_tokens": 7}
 
     app = build_app(core, confirm_block=True, offline=False, upstream=upstream)
     with _Server(app) as server:
@@ -76,7 +80,7 @@ def test_real_uvicorn_serves_and_injects(core, scope):
         client.close()
 
     # ① 上游确实收到了注入过的 messages
-    forwarded = captured.get("messages")
+    forwarded = (captured.get("payload") or {}).get("messages")
     assert isinstance(forwarded, list) and forwarded, "上游应收到消息"
     blob = "\n".join(str(m.get("content") or "") for m in forwarded)
     assert "简历投递前必须先过一遍错别字" in blob, "记忆必须注入到转发给上游的消息里"
@@ -92,8 +96,8 @@ def test_real_server_confirm_block_is_appended_and_switchable(core, scope):
     core.write(scope, "我的期望城市是北京", kind="preference", source_quote="用户原话")
     core.write(scope, "我的期望城市是杭州", kind="preference", source_quote="用户改口")
 
-    def upstream_ok(messages, *, model="", stream=False, body=None):
-        return "上游回复", {}
+    def upstream_ok(payload, *, model="", endpoint="chat", stream=False, body=None):
+        return {"choices": [{"message": {"role": "assistant", "content": "上游回复"}}], "usage": {}}, {}
 
     with _Server(build_app(core, confirm_block=True, offline=False, upstream=upstream_ok)) as server:
         base = f"http://127.0.0.1:{server.port}"

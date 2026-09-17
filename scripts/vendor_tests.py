@@ -14,6 +14,9 @@ import argparse
 import re
 from pathlib import Path
 
+# 代理层模块（前身的格式转换层）——它们的目标包是 hippocampus.proxy，不是 memory
+PROXY_MODULES = {"format_converters", "llm_proxy", "responses_adapter"}
+
 PORTABLE_MODULES = {
     "database",
     "retrieval",
@@ -48,7 +51,6 @@ EXCLUDED = {
     "test_auth.py",
     "test_backup_acceptance.py",
     "test_cache_fix_acceptance.py",
-    "test_format_converters.py",
     "test_import_acceptance.py",
     "test_injection_fix_acceptance.py",
     "test_maintenance_schedule.py",
@@ -104,7 +106,7 @@ def _port(text: str, filename: str) -> tuple[str, int]:
             dropped += 1
             continue
         m = _IMPORT_RE.match(line.rstrip("\r\n"))
-        if m and m.group("mod") in PORTABLE_MODULES:
+        if m and m.group("mod") in (PORTABLE_MODULES | PROXY_MODULES):
             indent, kw, mod, rest, tail = (
                 m.group("indent"),
                 m.group("kw"),
@@ -112,10 +114,11 @@ def _port(text: str, filename: str) -> tuple[str, int]:
                 m.group("rest"),
                 m.group("tail"),
             )
+            pkg = TARGET_PACKAGE.get(mod, "hippocampus.memory")
             if kw == "import":
-                out.append(f"{indent}from hippocampus.memory import {mod}{rest}{tail}\n")
+                out.append(f"{indent}from {pkg} import {mod}{rest}{tail}\n")
             else:
-                out.append(f"{indent}from hippocampus.memory.{mod}{rest}{tail}\n")
+                out.append(f"{indent}from {pkg}.{mod}{rest}{tail}\n")
             rewritten += 1
             continue
         # 字符串形式的模块路径（monkeypatch.setattr("extract.chat_json", …)）也要改写
@@ -128,6 +131,9 @@ def _port(text: str, filename: str) -> tuple[str, int]:
     body = _apply_adaptations(body, filename)
     return header + body, rewritten
 
+
+TARGET_PACKAGE = {mod: "hippocampus.memory" for mod in PORTABLE_MODULES}
+TARGET_PACKAGE.update({mod: "hippocampus.proxy" for mod in PROXY_MODULES})
 
 _STR_TARGET_RE = re.compile(r"([\"'])([A-Za-z_][A-Za-z_0-9]*)\.(?=[A-Za-z_])")
 # __import__("pipeline") / importlib.import_module("retrieval") 这类动态导入
@@ -142,10 +148,11 @@ def _restore_string_targets(line: str) -> tuple[str, int]:
     def _sub(m: re.Match) -> str:
         nonlocal count
         module = m.group(2)
-        if module not in PORTABLE_MODULES:
+        pkg = TARGET_PACKAGE.get(module)
+        if pkg is None:
             return m.group(0)
         count += 1
-        return f"{m.group(1)}hippocampus.memory.{module}."
+        return f"{m.group(1)}{pkg}.{module}."
 
     def _dyn(m: re.Match) -> str:
         nonlocal count

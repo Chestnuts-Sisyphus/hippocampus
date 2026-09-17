@@ -7,8 +7,10 @@ Hippocampus 把"记忆"做成 agent 的核心能力，而不是外挂的检索�
 - **记忆核心**：四通道检索（语义／关键词／图谱／事件线索）＋ 相关性断崖截断 ＋ 预算装填；
   stable／fluid 分层注入；双轨隔离（模型输出永不注入）；冲突挂起人工确认；生命周期与
   离线固化；安全与漏抽守卫。每条记忆**可查看、可改、可删、可追溯来源**。
-- **代理形态**：任何 OpenAI 兼容客户端把 `base_url` 指过来就获得记忆——请求前注入、
-  响应后固化、冲突随回复回传确认块。客户端**不改一行代码**。
+- **代理形态**：**三种入站格式**都接——OpenAI Chat Completions、OpenAI Responses、
+  Anthropic Messages（按请求体形状判定）；把 `base_url` 指过来就获得记忆：请求前注入、
+  响应后固化、冲突随回复回传确认块，回复按客户端**自己那套协议**返回。客户端不改一行代码。
+  详见 [docs/proxy.md](docs/proxy.md)（含格式矩阵与诚实边界）。
 - **Agent 形态**：LangGraph 编排（think／act／answer）＋ LangChain 工具接入；检索决定
   上下文 → 执行 → 判分决定固化；三出口（完成／无法完成／需人工升级）；轨迹可复演。
 
@@ -58,7 +60,8 @@ hippocampus demo --memories            # 一键跑评测题 + 记忆开/关对�
 
 ```bash
 hippocampus proxy --port 8765
-# 然后把你的 OpenAI 兼容客户端的 base_url 改成 http://127.0.0.1:8765/v1
+# 然后把客户端的 base_url 改成 http://127.0.0.1:8765
+#    OpenAI Chat：/v1/chat/completions   Responses：/v1/responses   Anthropic：/v1/messages
 ```
 
 Agent 形态：
