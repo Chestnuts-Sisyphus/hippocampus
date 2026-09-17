@@ -15,10 +15,12 @@
 
 from __future__ import annotations
 
+import itertools
 import json
 import os
 import sys
 import threading
+import time
 import uuid
 from pathlib import Path
 from typing import Any
@@ -45,6 +47,14 @@ __all__ = ["MemoryCore", "MemoryCoreError", "WriterBusy"]
 
 # D4（A35）：pending 确认块默认 TTL（7 天）。超时未裁决 → 标记"未决冲突"，旧值保持生效。
 PENDING_TTL_MS = 7 * 24 * 3600 * 1000
+
+# A10：每次注入调用一个递增序号（进程内），与时间戳拼成 run_id——同 query 多次注入
+# （agent 多步思考、代理多轮重复推进）也能区分，explain 按它贯通审计事件不串步。
+_INJECT_SEQ = itertools.count(1)
+
+
+def _new_run_id() -> str:
+    return f"{int(time.time() * 1000)}-{next(_INJECT_SEQ)}"
 
 
 class MemoryCoreError(RuntimeError):
@@ -102,6 +112,7 @@ class MemoryCore:
 
         self.backend: Any = backend if backend is not None else backend_mod.SqliteChromaBackend(vector=self.vector)
         self._sessions: dict[str, mb.MemorySession] = {}
+        self._session_last_used: dict[str, float] = {}
         self._locks: dict[str, WriterLock] = {}
         self._registry_guard = threading.RLock()
         if scope is not None:
@@ -133,7 +144,41 @@ class MemoryCore:
                     session = self.backend.open_session(account, data_dir)
                 self._sessions[account] = session
                 self._restore_pending(session)
-            return session
+            self._session_last_used[account] = time.monotonic()
+        # A2/T5：会话缓存 LRU 逐出——多账户/长跑（LME 一题一账户等）内存有界
+        self._evict_lru_sessions(keep=account)
+        return session
+
+    def _evict_lru_sessions(self, *, keep: str) -> int:
+        """超上限时把最久未用的账户会话 close 掉（跳过锁被持有的＝正在使用）。
+
+        返回逐出个数。判"正在使用"＝`session.lock` 能否无阻塞获取：拿不到锁说明
+        该账户此刻在别的线程里做读写，不逐出；同一时刻被返回的 `keep` 账户也绝不逐出。
+        数据都在磁盘上，逐出的账户下次访问会重开（`_restore_pending` 幂等）。
+        """
+        max_sessions = mb._bridge_cache_max()  # noqa: SLF001 - 同一上限，两处缓存同源
+        evicted = 0
+        with self._registry_guard:
+            while len(self._sessions) > max_sessions:
+                victim = min(
+                    self._sessions,
+                    key=lambda a: self._session_last_used.get(a, 0.0) if a != keep else float("inf"),
+                )
+                if victim == keep:
+                    return evicted  # 只剩 keep 也超上限：不动正在用的
+                session = self._sessions[victim]
+                if not session.lock.acquire(blocking=False):
+                    # 有线程正握着这把锁：不能逐出；标成最近用避免下一轮又选中它空转
+                    self._session_last_used[victim] = time.monotonic()
+                    return evicted
+                try:
+                    session.close()
+                finally:
+                    session.lock.release()
+                self._sessions.pop(victim, None)
+                self._session_last_used.pop(victim, None)
+                evicted += 1
+        return evicted
 
     def _restore_pending(self, session: mb.MemorySession) -> None:
         """把库里未决的确认块恢复进会话队列（跨进程的"挂起 → 下个会话裁决"）。
@@ -202,7 +247,9 @@ class MemoryCore:
         "session_id": str, "speaker": str}`（`session_id` 缺省用 scope.session）。
         每项还可带 `as_memory`／`as_episode`（覆盖本轮的落两处开关）——**同一条内容不要
         同时落两个池**：注入条数有上限，复制一份等于白占一个位子（实测影响见
-        `docs/benchmark.md` 的导入口径说明）。
+        `docs/benchmark.md` 的导入口径说明）；`entities: list[str]`（可选，A4/T8）——
+        调用方预抽取的实体名（如英文专名），机械建实体并挂到本轮的记忆/经历上
+        （缺省=None，行为与旧版完全一致）。
         `sync=True` 时导入完统一同步一次向量索引 + 重建 BM25（**批内不逐条同步**——
         逐条同步会让导入退化成 O(n²)）。
         返回 `{"episodes": n, "memories": n}`。
@@ -227,6 +274,16 @@ class MemoryCore:
                     entity_ids.append(
                         existing["id"] if existing else db.add_entity(session.conn, speaker, "Person")
                     )
+                if turn.get("entities"):
+                    # A4/T8：调用方预抽取的实体（英文专名等）机械建实体并挂上
+                    for name in turn["entities"]:
+                        name = str(name).strip()
+                        if not name:
+                            continue
+                        existing = db.find_entity_by_name(session.conn, name)
+                        entity_ids.append(
+                            existing["id"] if existing else db.add_entity(session.conn, name, "Concrete")
+                        )
                 want_ep = bool(turn.get("as_episode", True))
                 want_mem = bool(turn.get("as_memory", as_memories))
                 pid = ""
@@ -397,7 +454,12 @@ class MemoryCore:
                 out.pending.append(mid)
                 self._queue_pending(session, [(hold_old, mid, hold_reason)], reason=hold_reason)
             session.conn.commit()
-            self._reindex(session)
+            # T6/A3：增量索引同步——只同步本次写触碰的行（新记忆＋新经历＋被取代的旧记忆），
+            # 不再每次写都全量 upsert 全库（1154 记忆规模 p50 632.8ms → 目标 ≤200ms）。
+            sync_ids: list[str] = [mid, pid]
+            if supersede_old is not None:
+                sync_ids.append(supersede_old)
+            self._reindex(session, ids=sync_ids)
             return out
 
     def _semantic_dup(self, session: mb.MemorySession, kind: str, text: str, session_id: str) -> str | None:
@@ -442,8 +504,12 @@ class MemoryCore:
         except Exception as e:
             sys.stderr.write(f"[core] 挂起确认建块失败（软失败）: {e}\n")
 
-    def _reindex(self, session: mb.MemorySession) -> None:
+    def _reindex(self, session: mb.MemorySession, *, ids: list[str] | None = None) -> None:
         """写后收尾：同步向量索引 + 重建词法索引。
+
+        `ids=None` → 全量同步（幂等；导入/确认/删除等低频路径）；`ids=[...]` → **增量**
+        （T6/A3）：只把这几个 id 的最新状态同步进向量池（active→upsert、非 active→删除），
+        BM25 仍按库全量重建（内存级、1154 记忆规模下开销小）。
 
         **故意不在每次写后清 WAL**：`purge_embeddings_wal` 会把 chroma 的
         embeddings_queue 里的行进删掉，而刚 upsert 的行可能还没落进索引——实测这样做
@@ -455,7 +521,7 @@ class MemoryCore:
         `doctor` 的索引健康行也会读到它。
         """
         try:
-            rt.sync_index(session.conn, session.collections)
+            rt.sync_index(session.conn, session.collections, ids=ids)
             session.idx = rt.build_bm25(session.conn)
             session._index_error = ""
         except Exception as e:
@@ -533,7 +599,7 @@ class MemoryCore:
         """
         scope = _as_scope(scope)
         session = self._session(scope)
-        injection = Injection(flow=flow)
+        injection = Injection(flow=flow, run_id=_new_run_id())
         query = (query or "").strip()
         if not query:
             return injection
@@ -577,6 +643,7 @@ class MemoryCore:
             injection.note = f"（索引告警：{index_err}——本轮记忆注入可能不完整）"
         # A18（D1）：旁路审计通道——top-N=50 候选全集，供 explain 回答"那条为什么没进"
         # （旧版 explain 只看到检索 top-k 的被剔候选）。旁路：失败只记 stderr。
+        # A10：带上 run_id，explain 按语义链精确匹配合适步骤，不再靠 query 文本启发式。
         self._audit_retrieval(session, scope, query, injection, flow)
         return injection
 
@@ -628,7 +695,13 @@ class MemoryCore:
                         "reason": reason,
                     }
                 )
-            audit.record_retrieval(scope.account, query=query, candidates=candidates, injected_ids=injection.injected_ids)
+            audit.record_retrieval(
+                scope.account,
+                query=query,
+                candidates=candidates,
+                injected_ids=injection.injected_ids,
+                run_id=injection.run_id,
+            )
         except Exception as e:
             sys.stderr.write(f"[core] 旁路审计失败（不中断）: {e}\n")
 
@@ -1051,6 +1124,51 @@ class MemoryCore:
         ).fetchone()[0]
         return counts
 
+    def candidate_audit(self, scope: Scope) -> dict[str, Any]:
+        """候选（candidate）状态的计数审计（A12）。
+
+        candidate 的语义＝"写入时与旧值冲突、挂起待裁决，裁决前不参与注入/去重"
+        （见 `database.py` 中 P1/A34 口径）。本视图回答"候选池积压/错分了多少"：
+        总量占比、按 kind 分布、按滞留时长分桶、超过 TTL（7 天）仍未裁决的滞留数、
+        未决确认块数、抽样 id（人工复核用）。纯计数，不删改。
+        """
+        scope = _as_scope(scope)
+        session = self._session(scope)
+        with self._lock(scope.account).held(), session.lock:
+            self._expire_pending(session)
+            total = session.conn.execute("SELECT COUNT(*) FROM memories").fetchone()[0]
+            rows = session.conn.execute(
+                "SELECT id, type, created_at FROM memories WHERE status='candidate' "
+                "ORDER BY created_at LIMIT 1000"
+            ).fetchall()
+            now = db.now_ms()
+            by_kind: dict[str, int] = {}
+            by_age: dict[str, int] = {"<1d": 0, "1-7d": 0, ">7d": 0}
+            stale = 0
+            samples: list[str] = []
+            for r in rows:
+                by_kind[r["type"]] = by_kind.get(r["type"], 0) + 1
+                age_days = (now - (r["created_at"] or 0)) / 86400000.0
+                bucket = "<1d" if age_days < 1 else ("1-7d" if age_days <= 7 else ">7d")
+                by_age[bucket] += 1
+                if age_days > 7:
+                    stale += 1
+                if len(samples) < 10:
+                    samples.append(r["id"])
+            unresolved = session.conn.execute(
+                "SELECT COUNT(*) FROM pending_blocks WHERE resolved_at IS NULL"
+            ).fetchone()[0]
+            return {
+                "total_memories": total,
+                "candidates": len(rows),
+                "share_pct": round(100.0 * len(rows) / max(1, total), 2),
+                "by_kind": by_kind,
+                "by_age_days": by_age,
+                "stale_candidates": stale,
+                "unresolved_blocks": unresolved,
+                "sample_ids": samples,
+            }
+
     def set_switch(self, scope: Scope, command: str) -> str | None:
         """开关口令（`关闭记忆`／`打开记忆`／`停止学习`／`继续学习`）。"""
         scope = _as_scope(scope)
@@ -1158,6 +1276,7 @@ class MemoryCore:
                 except Exception:
                     pass
             self._sessions.clear()
+            self._session_last_used.clear()
             self._locks.clear()
 
     def __enter__(self) -> MemoryCore:

@@ -20,6 +20,7 @@ Hippocampus Phase 2A -- 记忆桥接层 memory_bridge.py
 """
 
 import json
+import os
 import re
 import sqlite3
 import sys
@@ -423,23 +424,85 @@ class MemorySession:
 # 进程级缓存：{account_id: MemorySession}（懒加载，全局锁保护创建）
 _BRIDGES: dict[str, MemorySession] = {}
 _BRIDGES_LOCK = threading.Lock()
+_BRIDGES_LAST_USED: dict[str, float] = {}
 
 # 待确认块队列上限（发现 28 修复：多槽，防堆积）
 _PENDING_MAX = 3
 
 
+def _bridge_cache_max() -> int:
+    """会话缓存上限（LRU 逐出，T5/A2）：多账户/长跑时内存有界。
+
+    默认 16 个账户会话（每个含一个 chroma PersistentClient）；环境变量可调
+    （`HIPPOCAMPUS_SESSION_CACHE_MAX`）。上限只影响**同时打开**的会话数，
+    数据都在磁盘上，逐出的账户再访问会重开。
+    """
+    try:
+        return max(1, int(os.environ.get("HIPPOCAMPUS_SESSION_CACHE_MAX", "16")))
+    except ValueError:
+        return 16
+
+
+def _evict_lru_bridges(keep: str) -> int:
+    """超上限时按最久未用逐出并 close（跳过锁被持有的账户＝正在使用）。
+
+    返回逐出个数。逐出只关"已经没有人在用"的会话（`session.lock` 可无阻塞获取
+    说明该账户此刻不在任何操作中）；正在被使用的账户不会被关掉（A2 并发安全）。
+    """
+    import time as _time
+
+    evicted = 0
+    with _BRIDGES_LOCK:
+        while len(_BRIDGES) > _bridge_cache_max():
+            victim = min(
+                _BRIDGES,
+                key=lambda a: _BRIDGES_LAST_USED.get(a, 0.0) if a != keep else float("inf"),
+            )
+            if victim == keep:
+                return evicted  # 只剩 keep 一个也超上限：不动正在用的
+            sess = _BRIDGES[victim]
+            if not sess.lock.acquire(blocking=False):
+                # 正在使用（锁被持有）→ 不能逐出；把它标成"最近用"避免无限自旋
+                _BRIDGES_LAST_USED[victim] = _time.monotonic()
+                return evicted
+            try:
+                sess.close()
+            finally:
+                sess.lock.release()
+            _BRIDGES.pop(victim, None)
+            _BRIDGES_LAST_USED.pop(victim, None)
+            evicted += 1
+    return evicted
+
+
 def get_bridge(account_id: str) -> MemorySession:
-    """获取账户的记忆会话（懒加载；同一账户全进程共享一个 session）。"""
+    """获取账户的记忆会话（懒加载；同一账户全进程共享一个 session）。
+
+    A2/T5：会话缓存有上限（`HIPPOCAMPUS_SESSION_CACHE_MAX`），超限按 LRU 逐出
+    （close 释放 chroma client），多账户长跑内存不再无界增长。
+    """
+    import time as _time
+
     with _BRIDGES_LOCK:
         if account_id not in _BRIDGES:
             _BRIDGES[account_id] = MemorySession(account_id)
-        return _BRIDGES[account_id]
+        _BRIDGES_LAST_USED[account_id] = _time.monotonic()
+        session = _BRIDGES[account_id]
+    _evict_lru_bridges(account_id)
+    return session
+
+
+def bridge_cache_size() -> int:
+    """当前打开的账户会话数（doctor／测试用）。"""
+    with _BRIDGES_LOCK:
+        return len(_BRIDGES)
 
 
 def drop_bridge(account_id: str) -> None:
     """关闭并移除会话（测试清理用）。"""
     with _BRIDGES_LOCK:
         sess = _BRIDGES.pop(account_id, None)
+        _BRIDGES_LAST_USED.pop(account_id, None)
     if sess is not None:
         sess.close()
 

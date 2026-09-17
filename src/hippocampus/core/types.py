@@ -101,6 +101,8 @@ class Injection:
     enabled: bool = True
     # 注入旁路说明（索引异常告警等；v1 追加字段，默认空串不破坏既有调用方）
     note: str = ""
+    # 每次注入调用的语义链标识（A10：explain 按它贯通审计事件，杜绝同 query 多步误匹配）
+    run_id: str = ""
 
     @property
     def text(self) -> str:

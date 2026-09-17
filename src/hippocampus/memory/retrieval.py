@@ -72,6 +72,10 @@ SESSION_CLUE_WORDS = ("上次", "之前聊", "那回", "上一次", "继续上�
 # 纯语义会把「你好」类垃圾激活为主题，见 skill pitfall 6 实测）
 TOPIC_BM25_RAW_FLOOR = 0.0
 
+# T9 逐通道消融钩子：None/空集＝四个通道全开（生产默认零变化）；
+# scripts/bench_ablation_channels.py 显式置为 {semantic|bm25|graph|event} 跑对照。
+_ABLATION_CHANNELS: set[str] | None = None
+
 # 寒暄词表（场景全覆盖表：纯寒暄/无实质 → 无检索空注入）。机械可审查，词表即验收用例
 GREETING_WORDS = {
     "你好",
@@ -471,22 +475,73 @@ def _pool_docs(conn: sqlite3.Connection, key: str) -> tuple[list[str], list[str]
     return ids, docs, metas
 
 
-def sync_index(conn: sqlite3.Connection, collections=None) -> dict:
-    """全量同步索引（幂等 upsert）。
+def _pool_docs_by_ids(conn: sqlite3.Connection, key: str, ids: list[str]) -> tuple[list[str], list[str], list[dict], list[str]]:
+    """源真相（memory.db）→ 只取给定 ids 的池文档（T6/A3 增量同步用）。
+
+    返回 (upsert_ids, documents, metadatas, delete_ids)：
+    - mem 池：`status='active'` 的记忆进 upsert；**非 active（superseded/archived/
+      candidate）返回进 delete_ids**——全量 `_pool_docs` 只取 active，增量必须把
+      掉出 active 的行从池里删掉，否则向量池与库不一致（旧行残留可被检索到）。
+    - ep 池：episodes 无状态筛选，全部照单 upsert（delete_ids 恒空）。
+    """
+    ids = [str(i) for i in ids]
+    if not ids:
+        return [], [], [], []
+    marks = ",".join("?" * len(ids))
+    if key == "mem":
+        up_ids: list[str] = []
+        docs: list[str] = []
+        metas: list[dict] = []
+        dele: list[str] = []
+        for m in conn.execute(f"SELECT * FROM memories WHERE id IN ({marks})", ids):
+            m = dict(m)
+            if m["status"] == "active":
+                up_ids.append(m["id"])
+                docs.append(m["content"])
+                metas.append({"kind": "memory", "type": m["type"], "priority": "high"})
+            else:
+                dele.append(m["id"])
+        return up_ids, docs, metas, dele
+    up_ids, docs, metas = [], [], []
+    for p in conn.execute(f"SELECT * FROM episodes WHERE id IN ({marks})", ids):
+        p = dict(p)
+        up_ids.append(p["id"])
+        docs.append(p["content"])
+        metas.append({"kind": "episode", "role": p["role"], "priority": p["priority"]})
+    return up_ids, docs, metas, []
+
+
+def sync_index(conn: sqlite3.Connection, collections=None, *, ids: list[str] | None = None) -> dict:
+    """同步索引（幂等 upsert）。
+
     collections: 双池 dict {mem, ep} → memories 进 mem 池（metadata 含 type），
     episodes 进 ep 池（metadata 含 role/priority）。
     单 collection 对象 → 兼容旧调用方（memories+episodes 混入，旧行为）。
-    返回 {"indexed", "memories", "episodes"}。
+    `ids=None` → **全量**（现状，幂等）；`ids=[...]` → **增量**（T6/A3）：
+    只处理这些行——active 记忆 upsert、非 active 记忆从池删除、episode upsert，
+    单条写入不再做全库级同步。
+    返回 {"indexed", "memories", "episodes"}（本批计数）。
     """
     pools = _normalize_collections(collections)
-    mem_ids, mem_docs, mem_metas = _pool_docs(conn, "mem")
-    ep_ids, ep_docs, ep_metas = _pool_docs(conn, "ep")
+    if ids is None:
+        mem_ids, mem_docs, mem_metas = _pool_docs(conn, "mem")
+        ep_ids, ep_docs, ep_metas = _pool_docs(conn, "ep")
+        del_mem_ids: list[str] = []
+    else:
+        mem_ids, mem_docs, mem_metas, del_mem_ids = _pool_docs_by_ids(conn, "mem", ids)
+        ep_ids, ep_docs, ep_metas, _ = _pool_docs_by_ids(conn, "ep", ids)
     # [HIPPO] 无向量库（未装 chromadb）时池为 None：跳过向量 upsert，词法通道照常工作
     if mem_ids and pools.get("mem") is not None:
         pools["mem"].upsert(ids=mem_ids, documents=mem_docs, metadatas=mem_metas)
     if ep_ids and pools.get("ep") is not None:
         # 双池：episodes 只进 ep 池；单对象兼容（同池）：memories 已写入，episodes 追加
         pools["ep"].upsert(ids=ep_ids, documents=ep_docs, metadatas=ep_metas)
+    if del_mem_ids and pools.get("mem") is not None:
+        # 掉出 active 的行从池里删掉（增量路径专责）；失败软处理，维护/重建可收敛
+        try:
+            pools["mem"].delete(ids=del_mem_ids)
+        except Exception:
+            sys.stderr.write("[index] 增量删除向量行失败（软失败，重建可收敛）\n")
     _wait_index_applied(pools, mem_count=len(mem_ids), ep_count=len(ep_ids))
     return {
         "indexed": len(mem_ids) + len(ep_ids),
@@ -1373,18 +1428,27 @@ def retrieve(
 
     # 2. 经验层三通道（mem 池）——各自独立打分
     # query embedding 只算一次，mem/ep 两池共用（任务书 8b 任务 1：复用 + LRU）
+    # T9 消融：_ABLATION_CHANNELS 非空时跳过对应通道（分数置空，其余照常）
+    ablation = _ABLATION_CHANNELS or set()
     q_emb = _query_embedding(query)
-    semantic_raw = _semantic_with_repair(
-        pools["mem"], query, n=top_k * OVER_FETCH, query_embedding=q_emb, repair=repair
-    )
-    semantic = {d: v["sim"] for d, v in semantic_raw.items()}  # 拍平为分数
+    semantic: dict[str, float] = {}
+    if "semantic" not in ablation:
+        semantic_raw = _semantic_with_repair(
+            pools["mem"], query, n=top_k * OVER_FETCH, query_embedding=q_emb, repair=repair
+        )
+        semantic = {d: v["sim"] for d, v in semantic_raw.items()}  # 拍平为分数
     if index is None:
         mem_index = build_bm25(conn, ["memories"])
     else:
         mem_index = index  # 兼容旧调用方（可能混池 → 通道内按 id 前缀过滤）
-    bm25_raw = bm25_search(mem_index, query)
-    bm25 = {d: s for d, s in bm25_raw.items() if not d.startswith(EPISODE_ID_PREFIX)}  # 经验层 BM25 只认 memories
-    graph = graph_search(conn, entity_ids)
+    bm25: dict[str, float] = {}
+    bm25_raw: dict[str, float] = {}
+    if "bm25" not in ablation:
+        bm25_raw = bm25_search(mem_index, query)
+        bm25 = {d: s for d, s in bm25_raw.items() if not d.startswith(EPISODE_ID_PREFIX)}  # 经验层 BM25 只认 memories
+    graph: dict[str, float] = {}
+    if "graph" not in ablation:
+        graph = graph_search(conn, entity_ids)
 
     # 3. 各通道绝对底线（语义/BM25 ≥ absolute_floor，图 ≥ graph_floor）
     semantic = _channel_floor(semantic, abs_floor)
@@ -1436,9 +1500,13 @@ def retrieve(
                     graph_sorted = graph_sorted[: cliff_info["graph"]["kept"]]
 
     # 6. 事件层线索通道（ep 池，分轨不互相否决）
-    event = episode_clue_search(
-        conn, query, pools, now_ms=db.now_ms(), top_k=top_k, query_embedding=q_emb, repair=repair
-    )
+    if "event" not in ablation:
+        event = episode_clue_search(
+            conn, query, pools, now_ms=db.now_ms(), top_k=top_k, query_embedding=q_emb, repair=repair
+        )
+    else:
+        # T9 消融：返回与正常结构同形的零结果（下游按 dict 键取）
+        event = {"results": [], "active": False, "path": "ablated", "clues": {}, "total_matched": 0, "_sem_ep": {}}
 
     # 6b. [HIPPO] 图通道**同分内词面重排**（英文语料实测暴露的真问题）：
     # 图通道给的是离散分（0.5/0.3/0.15），**同分候选之间没有任何相关性排序**——问
