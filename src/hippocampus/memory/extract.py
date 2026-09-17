@@ -69,13 +69,13 @@ def is_emotional_status(mem: dict) -> bool:
 
 
 # P2（HC-0815-02 节点2）：记忆类型白名单（LLM 输出校验，防类型泄漏/乱造类型）。
-# 观察线实测：status 混入轨道A 47%（发现 16 更正版）；LLM 可能输出 task/goal 等
+# 观察线实测：status 混入确认轨 47%（发现 16 更正版）；LLM 可能输出 task/goal 等
 # 非法类型 → 机械剔除，保证入库类型只四类。
 VALID_MEMORY_TYPES = ("preference", "fact", "resource", "status")
 
 
 def filter_valid_memories(memories: list[dict]) -> list[dict]:
-    """类型白名单过滤：剔除 type 不在四类内的记忆（轨道A/B 共用，防类型泄漏）。"""
+    """类型白名单过滤：剔除 type 不在四类内的记忆（双轨共用，防类型泄漏）。"""
     if not memories:
         return []
     return [m for m in memories if isinstance(m, dict) and m.get("type", "fact") in VALID_MEMORY_TYPES]
@@ -246,7 +246,7 @@ EXTRACT_SYSTEM = """你是记忆提取引擎，为"像人一样有记忆的AI"�
   · 版本号/HEAD/commit/哈希类（如「HEAD 在 1a2b3c4」「commit abc123 改了检索」）——换 commit 即失效
   · 运行号/任务号/构建号（如「run 42 失败了」「构建 #17 通过」）——一次性运行信息
   · 完成态任务断言（如「已完成 X」「已交付 X」「X 设计得差不多了」）——当前计划的临时状态，不值得长期记住
-  注意：**进行中的进度状态必须提取为 status**（「轨道B开发进行到一半」「验收进度完成一半」
+  注意：**进行中的进度状态必须提取为 status**（「支付模块开发进行到一半」「验收进度完成一半」
   「这个 bug 已经修复了」——将来会变化但有长期意义）；「已完成 X」的区分点在
   「X」是任务/事项（临时清单项）而非结果（bug/功能等长期成果）。
 - 【否定偏好·必查】「不要/不能/不该/别/禁止/别用/别管」开头的约束句 = 稳定偏好（约束以后行为方式），必须提取为 preference——哪怕情绪化。
@@ -434,7 +434,7 @@ def _extract_with_llm(user_text: str) -> dict[str, Any]:
     return {"entities": entities, "memories": filter_valid_memories(memories)}
 
 
-# 轨道B专用提取 prompt：从 AI 回复里提取 resource/status（独立于轨道A的用户话提取）
+# 观察轨专用提取 prompt：从 AI 回复里提取 resource/status（独立于确认轨的用户话提取）
 # 关键：区分「AI 陈述的事实/资源/状态」vs「AI 的客套/猜测/表态」，宁缺毋滥。
 # 只提取稳定、值得长期记住的资源/状态；每条带 source_quote（AI 原话片段）。
 EXTRACT_RESPONSE_SYSTEM = """你是记忆提取引擎，为「把 AI 回复里的资源/状态自动记住」服务。
@@ -455,14 +455,14 @@ EXTRACT_RESPONSE_SYSTEM = """你是记忆提取引擎，为「把 AI 回复里�
 
 【状态 status】描述「当前/近期」某个事情的进展、结果、变化，将来可能不同。
 - 正例：「这个 bug 已经修复了」→ status
-- 正例：「轨道B开发进行到一半」→ status
+- 正例：「B 阶段开发进行到一半」→ status
 - 正例：「测试已通过」「部署已完成」→ status
 - 反例（不提取）：「明天记得备份」（行为指令，不是当前状态）
 - 反例（不提取）：「代码质量还不错」（主观评价，模糊，不提取）
 - 【瞬时状态·不提取】（P1）：版本号/HEAD/commit/哈希类（「HEAD 在 1a2b3c4」「commit abc123」）、
   运行号/任务号（「run 42 失败了」「构建 #17 通过」）、完成态任务断言/任务描述
   （「已完成 X」「已交付 X」）——一次性/换 commit 即失效的信息，一律不提取；
-  进行中的进度状态（「轨道B开发进行到一半」）是有长期意义的 status，照常提取。
+  进行中的进度状态（「B 阶段开发进行到一半」）是有长期意义的 status，照常提取。
 
 【总原则】
 - 宁缺毋滥：拿不准就不提取。污染记忆比漏记更糟。
@@ -477,7 +477,7 @@ EXTRACT_RESPONSE_SYSTEM = """你是记忆提取引擎，为「把 AI 回复里�
 
 
 def extract_response_items(ai_text: str) -> dict[str, Any]:
-    """轨道B：从 AI 回复文本提取 resource/status（独立 prompt，宁缺毋滥）。
+    """观察轨：从 AI 回复文本提取 resource/status（独立 prompt，宁缺毋滥）。
 
     返回 {"entities": [...], "memories": [...]}，与 extract() 同构，供入库复用。
     LLM 调用失败/超时抛异常（上层软失败即可）；ai_text 为空返回空结构。

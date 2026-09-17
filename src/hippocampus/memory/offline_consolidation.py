@@ -29,7 +29,7 @@ CONSOLIDATE_AFTER_MS = 7 * 24 * 3600 * 1000
 
 def _undistilled_episodes(conn: sqlite3.Connection, cutoff: int, limit: int = 200) -> list[dict]:
     """未蒸馏的 user episode 候选：derived_memory_ids 为空 且 timestamp ≤ cutoff。
-    role='user' 才提炼（assistant 经历走轨道B 独立路径）。"""
+    role='user' 才提炼（assistant 经历走观察轨独立路径）。"""
     rows = conn.execute(
         "SELECT * FROM episodes WHERE role='user' AND timestamp <= ? "
         "AND (derived_memory_ids IS NULL OR derived_memory_ids='' OR derived_memory_ids='[]') "

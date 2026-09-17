@@ -29,9 +29,9 @@ def process_user_message(
 ) -> dict[str, Any]:
     """处理一条用户消息：提取 → 消歧 → 入库 → 返回摘要
 
-    可选参数（轨道A前移用，默认 None 行为零变化）：
+    可选参数（确认轨并发用，默认 None 行为零变化）：
       memory_types: 只入库这些类型（如 ['preference','fact']）；None=全部类型。
-      episode_id: 复用已建 episode（轨道A与 after_response 并发，避免 invalidation 前 status/resource
+      episode_id: 复用已建 episode（确认轨与 after_response 并发，避免 invalidation 前 status/resource
                   重复写库）。给出时跳过新建 episode，新记忆 source_episode_id 指向它。
       collections: 双池 dict {mem, ep}（P1 语义去重用；None=只做完全去重）。
     """
@@ -106,7 +106,7 @@ def process_user_message(
     # 3. 记忆入库（ADD-only：只加不改）
     memory_ids: list[str] = []
     for mem in result.get("memories", []):
-        # 类型过滤（轨道A只取 preference/fact；after_response 只取 status/resource）
+        # 类型过滤（确认轨只取 preference/fact；after_response 只取 status/resource）
         if memory_types is not None and mem.get("type", "fact") not in memory_types:
             continue
         # P1（HC-0815-02 节点1）：瞬时状态机械拦截（HEAD 哈希/commit/run 号类，
