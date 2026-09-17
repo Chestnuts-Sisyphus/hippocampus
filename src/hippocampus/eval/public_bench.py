@@ -334,11 +334,21 @@ def run_items(
     shadow_log: bool = False,
     split_pools: bool = True,
     capture_context: bool = False,
+    neighbor_expand: bool = False,
+    neighbor_budget: int = 6,
+    english_entities: bool = False,
 ) -> dict[str, Any]:
     """跑一批题：**按 group 分组**（同组共享上下文，导入一次），逐题检索/注入并打分。
 
     返回报告 dict：总表 + 分类表 + 逐题明细（明细只在 `detail=True` 的调用方用）。
     `capture_context=True` 时把每题注入上下文原文写进明细（模型臂用；默认关，零变化）。
+    `neighbor_expand=True`（A1/T7，默认关＝零变化）：基础注入之后，把已注入轮
+    的 ±1 邻居（同 session）追加进上下文——被预算挤掉的证据轮常因其邻居在上下文
+    而能被这一轮扩展带回来（上界 +22.5pp）。预算 `neighbor_budget` 只裁剪追加量；
+    tokens 增量随行记录。
+    `english_entities=True`（A4/T8，默认关＝零变化）：导入时对每轮做**机械英文专名
+    抽取**（`extract_english_entities`），把实体挂到图通道——衡量"图通道对英文实体
+    贡献"的 A/B 开关。
     """
     groups: dict[str, list[Item]] = {}
     for item in items:
@@ -347,11 +357,19 @@ def run_items(
     ingested: dict[str, dict[str, int]] = {}
     for gi, (group, group_items) in enumerate(groups.items(), 1):
         scope = Scope(account=f"{account_prefix}-{gi}", session="bench", source="user")
+        turns = group_items[0].turns
+        turn_dicts = [_turn_dict(t, date_prefix, split_pools=split_pools) for t in turns]
+        if english_entities:
+            for t, td in zip(turns, turn_dicts, strict=True):
+                names = extract_english_entities(t.text)
+                if names:
+                    td["entities"] = names
         counts = core.ingest_history(
             scope,
-            [_turn_dict(t, date_prefix, split_pools=split_pools) for t in group_items[0].turns],
+            turn_dicts,
             as_memories=as_memories,
         )
+        turn_idx = neighbor_turn_indices(turns) if neighbor_expand else {}
         # 跑批口径（全部走项目自己的"人工标定"入口，不手写 SQL）：
         #  - 关掉逐题 shadow 调试行（纯 stderr 诊断，跑批时干扰读数）；
         #  - 需要时改注入条数上限（消融对照用）。
@@ -368,6 +386,24 @@ def run_items(
             injection = core.inject_finalize(scope, item.question)
             latency_ms = (time.perf_counter() - t0) * 1000.0
             context = injection.text or ""
+            neighbors_added = 0
+            if neighbor_expand and turn_idx:
+                injected_idxs = []
+                for it in injection.items:
+                    hit = turn_idx.get(normalize_text(it.content))
+                    if hit is not None:
+                        injected_idxs.append(hit)
+                if injected_idxs:
+                    extra = neighbor_texts(
+                        turns,
+                        injected_idxs,
+                        context_norm=normalize_text(context),
+                        budget=int(neighbor_budget),
+                    )
+                    if extra:
+                        neighbors_added = len(extra)
+                        lines = _fmt_neighbors(extra)
+                        context = (context + "\n" + lines).strip()
             norm_ctx = normalize_text(context)
             # 命中判据：参考答案的任一等价写法（含日期 ISO 变体）出现在注入上下文里
             answer_hit = any(v and v in norm_ctx for a in item.answers for v in answer_variants(a))
@@ -388,6 +424,7 @@ def run_items(
                     "tokens": tokens,
                     "latency_ms": round(latency_ms, 2),
                     "n_injected": len(injection.items),
+                    "neighbors_added": neighbors_added,
                     "injected_kinds": sorted({i.kind for i in injection.items}),
                     **({"context": context} if capture_context else {}),
                 }
@@ -404,6 +441,7 @@ def run_items(
             "token_f1": _pct([float(r["f1"]) for r in subset]),
             "abstain_rate": _pct([1.0 if r["abstained"] else 0.0 for r in subset]),
             "tokens_mean": round(sum(r["tokens"] for r in subset) / len(subset), 1) if subset else 0.0,
+            "neighbors_added_mean": round(sum(r["neighbors_added"] for r in subset) / len(subset), 3) if subset else 0.0,
             "latency_p50_ms": _pctl(lat, 0.50),
             "latency_p95_ms": _pctl(lat, 0.95),
         }
@@ -423,6 +461,140 @@ def run_items(
 def _est_context_tokens(context: str) -> int:
     """注入上下文的 token 估算（与检索链同一口径：len//2 + 40）。"""
     return len(context or "") // 2 + 40 if context else 0
+
+
+# ----------------------------------------------------------------------
+# A1（T7）：±1 轮邻居扩展（基准跑批侧的检索链扩展，默认关）
+# ----------------------------------------------------------------------
+
+
+def neighbor_texts(
+    turns: list[Turn],
+    injected_indices: list[int],
+    *,
+    context_norm: str,
+    budget: int = 6,
+) -> list[Turn]:
+    """由"已注入的轮"推导需要追加的 ±1 邻居轮（A1/T7）。
+
+    只做一件事：**已注入轮的上/下一轮**（同一 session 内，不跨会话越界）整句
+    还没在上下文里的，取出来按顺序去重、受 `budget` 裁剪。预算只裁剪追加量，
+    不裁剪本轮基础注入。缺邻居（首轮/末轮/会话边界）自然跳过。
+
+    为什么是"已注入轮的邻居"而不是"证据轮"：检索命中的往往是被挤出预算的证据轮
+    的**邻居**——邻居进了上下文，扩一轮就能把证据本身带进来（实测上界 +22.5pp
+    = 未命中题里 38.3% 的邻居已在上下文，见 `docs/benchmark.md` §二·二b）。
+    """
+    if not injected_indices or not turns:
+        return []
+    out: list[Turn] = []
+    seen: set[int] = set()
+    for i in injected_indices:
+        if i < 0 or i >= len(turns):
+            continue
+        sid = turns[i].session_id
+        for j in (i - 1, i + 1):
+            if j < 0 or j >= len(turns):
+                continue
+            # 跨会话不越界：邻居必须与证据轮同属一个 session
+            if turns[j].session_id != sid:
+                continue
+            if j in seen:
+                continue
+            if normalize_text(turns[j].text) in context_norm:
+                continue  # 已在上下文的不重复追加
+            seen.add(j)
+            out.append(turns[j])
+            if len(out) >= budget:
+                return out
+    return out
+
+
+def neighbor_turn_indices(turns: list[Turn]) -> dict[str, int]:
+    """normalize 后的轮文本（含/不含日期前缀两态）→ 轮下标（同内容取最先）。
+
+    基准导入口径：用户轮落记忆条、全部轮落经历层，内容＝`[iso] 原文`（date_prefix）。
+    注入条目内容 → 轮下标的映射就靠它（内容级匹配，不依赖内部 id）。
+    """
+    idx: dict[str, int] = {}
+    for i, t in enumerate(turns):
+        n = normalize_text(t.text)
+        idx.setdefault(n, i)
+        if t.ts_ms:
+            iso = _iso_date(t.ts_ms)
+            idx.setdefault(normalize_text(f"[{iso}] {t.text}"), i)
+        idx.setdefault(normalize_text(t.text), i)
+    return idx
+
+
+def _fmt_neighbors(turns: list[Turn]) -> str:
+    """邻居轮追加块（A1/T7）：标记为"相邻轮"，与基础注入区分开。"""
+    head = "[相邻轮]"
+    body = "\n".join(f"- {t.text}" for t in turns)
+    return head + "\n" + body
+
+
+# 英文普通词大写形式（机械抽取的排除表：句首/代词/冠词等不是专名）
+_EN_STOP_CAPS = {
+    "A", "An", "The", "I", "You", "He", "She", "It", "We", "They", "This", "That",
+    "These", "Those", "My", "Your", "His", "Her", "Our", "Their", "Its", "And", "But",
+    "Or", "So", "If", "Then", "Now", "There", "Here", "When", "Where", "Why", "What",
+    "Who", "How", "Yes", "No", "In", "On", "At", "To", "For", "Of", "With", "From",
+    "By", "As", "About", "After", "Before", "During", "Since", "Until", "While",
+    "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+    "January", "February", "March", "April", "May", "June", "July", "August",
+    "September", "October", "November", "December", "Really", "Actually", "Also",
+}
+
+
+def extract_english_entities(text: str) -> list[str]:
+    """机械抽取英文专名（A4/T8）：句中大写的连续词（1-3 个）作为候选。
+
+    规则（全部机械、零 LLM）：
+    - 词形 = 首字母大写 + 其余小写（忽略全大写/混排），排除数字与普通词表；
+    - **不在句首**（避免把正常句首大写当专名）；
+    - 连续大写词合并成一个实体（"Alice Johnson"、"San Francisco"）；
+    - 每句最多取前 4 个候选，整段去重、保序。
+
+    精度不追求满分——这是"图通道对英文贡献是否为 0"的 A/B（T8），
+    机械摘取的噪声会被全量对照摊平。
+    """
+    import re as _re
+
+    if not text:
+        return []
+    out: list[str] = []
+    seen: set[str] = set()
+    _CAP = _re.compile(r"[A-Z][a-z]{2,}")
+    for sent in _re.split(r"[.!?]\s*", text or ""):
+        spans = [(m.group(0), m.start(), m.end()) for m in _CAP.finditer(sent)]
+        # 组式合并：原文相邻（间隔≤2 字符）的大写词成一串（"Alice Johnson"），
+        # 稀疏的大写词各自成组（"…while Bob stayed…" 的 Bob 独立）
+        groups: list[list[tuple[str, int, int]]] = []
+        cur: list[tuple[str, int, int]] = []
+        for sp in spans:
+            if cur and sp[1] - cur[-1][2] > 2:
+                groups.append(cur)
+                cur = []
+            cur.append(sp)
+        if cur:
+            groups.append(cur)
+        picked = 0
+        for g in groups:
+            if picked >= 4:
+                break
+            words = [w for w, _, _ in g if w not in _EN_STOP_CAPS]
+            if not words:
+                continue
+            # 句首独立大写词（组只有一个词且在原句最前）＝正常句首大写，不算专名
+            if len(g) == 1 and sent.lstrip().startswith(g[0][0]):
+                continue
+            name = " ".join(words)
+            if name not in seen:
+                seen.add(name)
+                out.append(name)
+            picked += 1
+    return out[:24]
 
 
 # ----------------------------------------------------------------------
@@ -450,6 +622,9 @@ def run(
     concurrency: int = 16,
     retries: int = 2,
     timeout_s: float = 120.0,
+    neighbor_expand: bool = False,
+    neighbor_budget: int = 6,
+    english_entities: bool = False,
 ) -> dict[str, Any]:
     """跑一个基准（LoCoMo／LongMemEval），返回报告 dict。
 
@@ -492,6 +667,9 @@ def run(
             shadow_log=shadow_log,
             split_pools=split_pools,
             capture_context=model_arm,
+            neighbor_expand=neighbor_expand,
+            neighbor_budget=neighbor_budget,
+            english_entities=english_entities,
         )
     finally:
         core.close()
@@ -506,6 +684,9 @@ def run(
         "split_pools": bool(split_pools),
         "inject_max_items": inject_max_items if inject_max_items is not None else "默认（8）",
         "shadow_log": bool(shadow_log),
+        "neighbor_expand": bool(neighbor_expand),
+        "neighbor_budget": int(neighbor_budget),
+        "english_entities": bool(english_entities),
         "offline": True,
         "model_arm": "未跑（离线档：不用大模型作答、不做 LLM 判分）",
         "scope": "一组一个 account（LoCoMo=一段对话；LongMemEval=一题）",
