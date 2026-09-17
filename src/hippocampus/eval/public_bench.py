@@ -10,9 +10,10 @@
   （金标准证据原文是否进上下文）、`token_f1`（离线作答器输出与参考答案的词面 F1，
   SQuAD 口径）、`abstain`（无依据时是否弃答，对抗题看这个）、上下文 token 数、
   单题检索+装配延迟 p50／p95。
-- **不报**：官方分数。LoCoMo／LongMemEval 的官方口径要用大模型作答 + LLM 判分；
-  本项目在**无模型端点**的离线档下跑，所以这里给的是**检索/词面口径**，不是官方分。
-  有端点时可以加模型臂（`--model-arm`，本模块只留接口与复跑命令，不做静默替代）。
+- **官方分要显式开关**：LoCoMo／LongMemEval 的官方口径要用大模型作答 +（LME）LLM 判分；
+默认离线档不跑（`model_arm=False`，行为与旧版完全一致）；显式 `--model-arm` 才出站，
+  实现与口径见 `hippocampus.eval.model_arm`（prompt 逐一钉官方仓库 revision）。
+  默认档给的仍是检索/词面口径，不是官方分。
 
 ## 边界（写进结果表里，别让读者自己猜）
 - 语料是**英文**，而本项目的分词/停用词/阈值是**为中文标定**的 → 英文召回偏弱；
@@ -130,6 +131,7 @@ class Item:
     evidence_texts: list[str] = field(default_factory=list)
     turns: list[Turn] = field(default_factory=list)
     group: str = ""  # 共享上下文的组名（LoCoMo＝对话 id；LongMemEval＝题号）
+    meta: dict[str, Any] = field(default_factory=dict)  # 数据自带字段（如 question_date），模型臂用
 
 
 # ----------------------------------------------------------------------
@@ -204,6 +206,7 @@ def load_locomo(path: str | Path, *, limit_conversations: int = 0) -> list[Item]
                     evidence_texts=evidence,
                     turns=turns,
                     group=cid,
+                    meta={"adversarial_answer": str(qa.get("adversarial_answer") or "")},  # cat5 对抗题选项字段
                 )
             )
     return out
@@ -246,6 +249,7 @@ def load_longmemeval(path: str | Path, *, limit: int = 0, offset: int = 0) -> li
                 evidence_texts=evidence,
                 turns=turns,
                 group=str(row.get("question_id") or ""),
+                meta={"question_date": str(row.get("question_date") or "")},
             )
         )
     return out
@@ -329,10 +333,12 @@ def run_items(
     inject_max_items: int | None = None,
     shadow_log: bool = False,
     split_pools: bool = True,
+    capture_context: bool = False,
 ) -> dict[str, Any]:
     """跑一批题：**按 group 分组**（同组共享上下文，导入一次），逐题检索/注入并打分。
 
     返回报告 dict：总表 + 分类表 + 逐题明细（明细只在 `detail=True` 的调用方用）。
+    `capture_context=True` 时把每题注入上下文原文写进明细（模型臂用；默认关，零变化）。
     """
     groups: dict[str, list[Item]] = {}
     for item in items:
@@ -364,9 +370,7 @@ def run_items(
             context = injection.text or ""
             norm_ctx = normalize_text(context)
             # 命中判据：参考答案的任一等价写法（含日期 ISO 变体）出现在注入上下文里
-            answer_hit = any(
-                v and v in norm_ctx for a in item.answers for v in answer_variants(a)
-            )
+            answer_hit = any(v and v in norm_ctx for a in item.answers for v in answer_variants(a))
             evidence_hit = any(normalize_text(e)[:80] in norm_ctx for e in item.evidence_texts if normalize_text(e))
             pred = injection.items[0].content if injection.items else ""
             tokens = _est_context_tokens(context)
@@ -385,6 +389,7 @@ def run_items(
                     "latency_ms": round(latency_ms, 2),
                     "n_injected": len(injection.items),
                     "injected_kinds": sorted({i.kind for i in injection.items}),
+                    **({"context": context} if capture_context else {}),
                 }
             )
         if progress_every and gi % progress_every == 0:
@@ -440,12 +445,19 @@ def run(
     shadow_log: bool = False,
     allow_online: bool = False,
     split_pools: bool = True,
+    model_arm: bool = False,
+    budget_yuan: float = 30.0,
+    concurrency: int = 16,
+    retries: int = 2,
+    timeout_s: float = 120.0,
 ) -> dict[str, Any]:
     """跑一个基准（LoCoMo／LongMemEval），返回报告 dict。
 
     **默认必须离线档**（`HIPPOCAMPUS_OFFLINE=1`）：否则记忆层的维护/固话链会去调模型端点——
     实测过一次"有 key 环境里跑基准，205 次请求全 401"的教训（既不可复现，也可能烧钱）。
     确实要跑模型臂时显式 `allow_online=True`。
+    `model_arm=True`：在检索/注入跑完后接**官方判分臂**（模型作答 + LME 判分），
+    作答输入＝每题注入上下文（top-8），不是全文；护栏与口径见 `hippocampus.eval.model_arm`。
     """
     from hippocampus import settings as _settings
 
@@ -454,6 +466,10 @@ def run(
             "基准评测默认要求离线档（不发任何出站请求）：请设 HIPPOCAMPUS_OFFLINE=1，"
             "或显式传 allow_online=True（会使用环境里的模型端点与凭据）"
         )
+    if model_arm and _settings.is_offline():
+        raise RuntimeError("模型臂要求非离线档：跑官方判分前请去掉 HIPPOCAMPUS_OFFLINE=1（显式开关才出站）")
+    if model_arm and not _settings.endpoint_ready():
+        raise RuntimeError("模型臂要求配好模型端点与凭据（HIPPOCAMPUS_BASE_URL / HIPPOCAMPUS_API_KEY 或密钥服务）")
     bench_key = (bench or "").lower()
     if bench_key in ("locomo", "locomo10"):
         items = load_locomo(data, limit_conversations=0)
@@ -475,6 +491,7 @@ def run(
             inject_max_items=inject_max_items,
             shadow_log=shadow_log,
             split_pools=split_pools,
+            capture_context=model_arm,
         )
     finally:
         core.close()
@@ -496,6 +513,37 @@ def run(
         "evidence_hit": "金标准证据原文进注入上下文",
         "f1": "离线作答器＝注入里分数最高的条目原文；无模型生成，故 F1 只是诊断值",
     }
+    if model_arm:
+        from hippocampus.eval import model_arm as _arm
+
+        arm_items = [
+            _arm.ArmItem(
+                qid=item.qid,
+                category=item.category,
+                question=item.question,
+                answers=item.answers,
+                context=row.get("context", ""),
+                extra=item.meta,
+            )
+            for item, row in zip(items, report["rows"], strict=False)
+        ]
+        print("\n[模型臂] 官方判分（作答输入＝注入上下文 top-8，非全文）……")
+        arm_report = _arm.run_official(
+            bench_key,
+            arm_items,
+            concurrency=int(concurrency),
+            retries=int(retries),
+            timeout_s=float(timeout_s),
+            budget_yuan=float(budget_yuan),
+        )
+        # 官方指标提一层（accuracy/f1/ci95/by_category），弹道层（calls/tokens/余额/rows）留在 official 里
+        report["official"] = {**arm_report.pop("official"), **arm_report}
+        report["protocol"]["offline"] = False
+        report["protocol"]["model_arm"] = (
+            "官方判分臂：模型作答（temperature 0）＋ LME LLM 判分；"
+            "作答输入＝记忆层注入上下文 top-8（inject_finalize 原文），不是全文；"
+            f"护栏＝并发 {concurrency}／重试 {retries}／超时 {timeout_s}s／预算 ¥{budget_yuan} 硬停"
+        )
     if json_out:
         Path(json_out).write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     return report
@@ -507,8 +555,8 @@ def render(report: dict[str, Any]) -> str:
         f"基准 {report.get('bench')}  数据 {report.get('data')}",
         f"题量 {report['overall']['n']}  组 {report['groups']}（同组共享上下文）",
         "",
-        "口径：answer_in_context／evidence_in_context／token_f1／abstain 均为离线档实测"
-        "（无模型端点：不用大模型作答、不做 LLM 判分，故非官方分）",
+        "口径：answer_in_context／evidence_in_context／token_f1／abstain 均为检索/词面口径"
+        "（无模型生成；官方分见下方 official 段，需显式 --model-arm）",
         "",
         f"{'分类':<22}{'题量':>6}{'答在文内':>10}{'证据在文内':>12}{'F1':>8}{'弃答率':>9}{'tokens':>9}{'p50ms':>8}{'p95ms':>8}",
     ]
@@ -523,6 +571,29 @@ def render(report: dict[str, Any]) -> str:
     lines.append(row("总体", report["overall"]))
     for cat, agg in report["by_category"].items():
         lines.append(row(cat, agg))
+    official = report.get("official")
+    if official:
+        lines.append("")
+        lines.append(f"官方判分（模型臂：{official.get('model')}，temperature 0）：{official.get('input_spec')}")
+        lines.append(f"  {official.get('metric')}")
+        if "f1" in official:
+            lines.append(f"  总体 F1 = {official['f1']}（95% CI {official['ci95']}，n={official['n']}）")
+            for cat, agg in official["by_category"].items():
+                lines.append(f"    {cat}: F1 {agg['score']}（n={agg['n']}）")
+        if "accuracy" in official:
+            lines.append(f"  总体准确率 = {official['accuracy']}（95% CI {official['ci95']}，n={official['n']}）")
+            for cat, agg in official["by_category"].items():
+                lines.append(f"    {cat}: {agg['accuracy']}（n={agg['n']}）")
+        lines.append(
+            f"  调用 {official['calls']['answer'] + official['calls']['judge']} 次"
+            f"（作答 {official['calls']['answer']}/判分 {official['calls']['judge']}），"
+            f"估算 ¥{official['cost_est_yuan']}，实际花费 ¥{official['spend_yuan']}"
+            f"（跑前 ¥{official['balance_before']} → 跑后 ¥{official['balance_after']}）"
+        )
+        if official.get("n_failed") or official.get("n_skipped"):
+            lines.append(
+                f"  ⚠ 未完成：失败 {official['n_failed']}／跳过 {official['n_skipped']}（上面的数不是全量，如实报）"
+            )
     return "\n".join(lines)
 
 
