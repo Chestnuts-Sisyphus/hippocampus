@@ -237,6 +237,48 @@ def _normalize_collections(collections) -> dict:
     return {"mem": collections, "ep": collections}
 
 
+# chroma 的写入先进队列、由后台 compactor 落到 HNSW 段；查询可能在落地前跑，
+# 表现为**偶发"刚写的记忆检索不到"**（实测：段未就绪时抛
+# "Error creating hnsw segment reader: Nothing found on disk"，语义通道整条空掉）。
+# 这里做两件事：写入后**校验收敛**（有界重试），查询失败时**自愈一次**（重放写入再查）。
+_INDEX_READY_RETRIES = 6
+_INDEX_READY_INTERVAL_S = 0.05
+
+
+def _wait_index_applied(pools: dict, *, mem_count: int, ep_count: int) -> bool:
+    """写入后校验向量池条数是否收敛（有界等待）。返回是否收敛。
+
+    软失败：超时只返回 False，不抛——检索另有自愈路径，且词法通道不依赖向量。
+    """
+    import time as _time
+
+    ok = True
+    for key, expected in (("mem", mem_count), ("ep", ep_count)):
+        col = pools.get(key)
+        if col is None or expected <= 0:
+            continue
+        for _attempt in range(_INDEX_READY_RETRIES):
+            try:
+                if col.count() >= expected:
+                    break
+            except Exception:
+                pass
+            _time.sleep(_INDEX_READY_INTERVAL_S)
+        else:
+            ok = False
+            sys.stderr.write(
+                f"[index] 向量池 '{key}' 写入后条数未收敛（预期 ≥{expected}）："
+                "检索可能变少；`hippocampus doctor` 可看索引健康\n"
+            )
+    return ok
+
+
+def _is_index_error(exc: Exception) -> bool:
+    """是不是"索引段还没就绪/读不到"这类可自愈的错误。"""
+    text = str(exc).lower()
+    return any(k in text for k in ("segment", "nothing found on disk", "hnsw", "not found on disk"))
+
+
 def sync_index(conn: sqlite3.Connection, collections=None) -> dict:
     """全量同步索引（幂等 upsert）。
     collections: 双池 dict {mem, ep} → memories 进 mem 池（metadata 含 type），
@@ -263,6 +305,7 @@ def sync_index(conn: sqlite3.Connection, collections=None) -> dict:
     if ep_ids and pools.get("ep") is not None:
         # 双池：episodes 只进 ep 池；单对象兼容（同池）：memories 已写入，episodes 追加
         pools["ep"].upsert(ids=ep_ids, documents=ep_docs, metadatas=ep_metas)
+    _wait_index_applied(pools, mem_count=len(mem_ids), ep_count=len(ep_ids))
     return {
         "indexed": len(mem_ids) + len(ep_ids),
         "memories": len(mem_ids),
@@ -421,9 +464,49 @@ def semantic_search(collection, query: str, n: int = TOP_K * OVER_FETCH, query_e
                     file=sys.stderr,
                 )
                 return {}
-            raise
+            if _is_index_error(e):
+                # [HIPPO] 索引段偶发读不到（写入还在后台 compactor 队列里）→ **自愈一次**：
+                # 等一拍再查；仍不行就**大声报**（不再静默空注入——这曾是"明明有记忆却检索不到"
+                # 的隐蔽原因）。返回空只影响语义通道，BM25/图/事件照常。
+                import time as _time
+
+                _time.sleep(_INDEX_READY_INTERVAL_S * 2)
+                try:
+                    res = collection.query(
+                        query_embeddings=[list(query_embedding)],
+                        n_results=min(n, 1000),
+                        include=["distances", "metadatas"],
+                    )
+                except Exception as e2:
+                    sys.stderr.write(
+                        f"[index] 语义通道读索引失败（已重试一次，本次跳过语义通道；"
+                        f"其余通道照常）：{e2}\n"
+                        "  提示：`hippocampus doctor` 看索引健康，必要时重建索引\n"
+                    )
+                    return {}
+            else:
+                raise
     else:
-        res = collection.query(query_texts=[query], n_results=min(n, 1000), include=["distances", "metadatas"])
+        try:
+            res = collection.query(query_texts=[query], n_results=min(n, 1000), include=["distances", "metadatas"])
+        except Exception as e:
+            if _is_index_error(e):
+                import time as _time
+
+                _time.sleep(_INDEX_READY_INTERVAL_S * 2)
+                try:
+                    res = collection.query(
+                        query_texts=[query], n_results=min(n, 1000), include=["distances", "metadatas"]
+                    )
+                except Exception as e2:
+                    sys.stderr.write(
+                        f"[index] 语义通道读索引失败（已重试一次，本次跳过语义通道）：{e2}\n"
+                    )
+                    return {}
+            elif "dimension" in str(e).lower():
+                return {}
+            else:
+                raise
     ids = res["ids"][0]
     dists = res["distances"][0]
     metas = res["metadatas"][0]

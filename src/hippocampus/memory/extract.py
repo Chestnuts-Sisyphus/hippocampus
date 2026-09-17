@@ -138,16 +138,26 @@ def extract_by_rules(text: str) -> dict[str, Any]:
     """句式规则抽取（离线档）：按句切分 → 逐句判类型 → 产出同一格式。
 
     只抽**显式陈述句**：句子以"我"开头且命中偏好/状态/资源句式，或整句命中完成态句式。
-    疑问句一律不抽（问题不是记忆）。
+
+    两条硬边界（都是实测踩出来的）：
+
+    - **疑问句一律不抽**。踩过的坑：切句时把"？"当分隔符丢掉了，于是
+      「我投简历有什么要求？」被剥成「我投简历有什么要求」→ 命中"我+投"句式被当成偏好入库；
+      下一轮用户问同一句话时，这条"记忆"与查询逐字相似（sim 0.95）→ 独占语义通道 +
+      被"防重复注入已见内容"过滤 → **注入被挤成 0**。所以这里保留句末标点判疑问，
+      并检查句中疑问词（不只查句首）。
+    - **祈使句不抽**（"帮我…""把…写成文件""列出…"）：那是任务指令，不是关于用户的陈述。
     """
     body = (text or "").strip()
     if not body:
         return {"entities": [], "memories": []}
-    sentences = [s.strip() for s in re.split(r"[。！？!?；;\n]+", body) if s.strip()]
+    # 保留句末标点（capturing 切分）：疑问号是判"这句是不是问题"的唯一可靠线索
+    sentences = [s.strip() for s in re.findall(r"[^。！？!?；;\n]+[。！？!?；;]?", body) if s.strip()]
     memories: list[dict[str, Any]] = []
-    for sentence in sentences:
-        if sentence.endswith(("吗", "呢")) or sentence.startswith(("什么", "怎么", "为什么", "哪", "谁", "几")):
+    for raw in sentences:
+        if _is_question(raw) or _is_imperative(raw):
             continue
+        sentence = raw.rstrip("。！!；;").strip()  # 入库内容不带句末标点（问号句前面已排除）
         if len(sentence) < 4 or len(sentence) > 200:
             continue
         kind = ""
@@ -168,6 +178,35 @@ def extract_by_rules(text: str) -> dict[str, Any]:
     memories = filter_valid_memories(memories)
     entities = _rule_entities(body)
     return {"entities": entities, "memories": memories}
+
+
+# 疑问标记：句末标点 + 句中疑问词（不只查句首——"我投简历有什么要求"这类疑问词在中段）
+_QUESTION_WORDS = (
+    "什么", "怎么", "怎样", "如何", "为什么", "为啥", "哪些", "哪个", "哪家", "哪里", "哪儿",
+    "多少", "多久", "多长", "几点", "几个", "几号", "谁", "是不是", "有没有", "要不要",
+    "吗", "呢", "咋", "何时", "是否", "能不能", "可不可以", "好不好",
+)
+# 祈使/任务指令开头（那是让我干活，不是关于用户的陈述）
+_IMPERATIVE_HEADS = (
+    "帮我", "请帮", "请", "把", "给我", "列出", "列一下", "导出", "生成", "整理", "写一个",
+    "写个", "做成", "跑一下", "执行", "查一下", "看看", "找一下", "搜一下",
+)
+
+
+def _is_question(sentence: str) -> bool:
+    """是不是疑问句（句末问号，或句中带疑问词）。"""
+    text = (sentence or "").strip()
+    if not text:
+        return True
+    if text.endswith(("？", "?")):
+        return True
+    return any(word in text for word in _QUESTION_WORDS)
+
+
+def _is_imperative(sentence: str) -> bool:
+    """是不是祈使/任务指令句。"""
+    text = (sentence or "").strip()
+    return any(text.startswith(head) for head in _IMPERATIVE_HEADS)
 
 
 # 提取系统提示：复用 Mem0 V3 精华（When in doubt extract / 穷举检查清单 / 反首题主导）
