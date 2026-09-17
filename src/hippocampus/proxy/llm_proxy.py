@@ -55,12 +55,27 @@ def build_headers(llm_cfg: dict) -> dict:
     }
 
 
+def _validated(url: str) -> str:
+    """出站 URL 校验（安全审计 N20-③，A41 同口径）：只允许 http/https。
+
+    用 `validate_endpoint_url`（**允许环回**）：上游模型端点是操作员显式配置的本地基础设施，
+    与"数据/模型提供的 URL"（`validate_outbound_url`，拒环回/私有/保留）分开管。
+    """
+    from hippocampus.net import validate_endpoint_url
+
+    return validate_endpoint_url(url)
+
+
 def call_upstream(llm_cfg: dict, url: str, payload: dict, headers: dict, timeout: float = 120.0):
     """非流式 POST。
 
     返回 (status_code, body)。非 2xx 原样返回上游错误体（由调用方决定转发策略）。
     连接失败/超时抛 httpx.HTTPError。
+
+    安全（N20-③）：出站前过 `_validated`（只 http/https）。本函数是**随迁备用路径**，
+    产线非流式走 `settings.llm_post_json`（那里同样校验端点）。
     """
+    url = _validated(url)
     resp = httpx.post(url, json=payload, headers=headers, timeout=timeout)
     try:
         body = resp.json()

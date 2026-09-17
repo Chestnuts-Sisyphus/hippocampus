@@ -27,6 +27,7 @@
 # FastAPI 会把 request 当成查询参数（实测得到 422 "Field required: query.request"）。
 # 保持注解即时求值 + 函数内导入 fastapi，就能让 fastapi 仍是可选依赖。
 
+import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -47,13 +48,16 @@ class UpstreamHTTPError(RuntimeError):
         self.body = body
 
 
-def _scope_from(headers: dict[str, str], default_account: str = "default") -> Scope:
+def _scope_from(headers: dict[str, str], default_account: str = "default", bucketing: str = "day") -> Scope:
     """从请求头解析 scope。
 
     - account：`X-Hippocampus-Account`；缺省用 default（单机单用户是设计目标，
       不是"多租户"——头只是给"我想分开几个记忆库"的人留的口子）
-    - session：`X-Hippocampus-Session` 或常见的 `X-Session-Id`；缺省按日期分桶，
-      保证"同一段对话的上下文连续、跨天不串"
+    - session：`X-Hippocampus-Session` 或常见的 `X-Session-Id`；**显式传了就按传的**。
+      没传时按配置 `proxy.session_bucketing` 分桶（A7 可配）：
+        - `day`（默认）：`day-YYYYMMDD`——同一段对话的上下文连续、跨天不串；
+        - `hour`：`hour-YYYYMMDDHH`——换得更勤，跨天续接的语义按小时切；
+        - `none`：不按时间分桶（固定 `default`）——跨天续接同一个会话（由客户端自己管边界）。
 
     头是**外部输入**：account 立即过目录穿越校验（非法在入口就拒，不落到文件系统上）。
     """
@@ -63,7 +67,13 @@ def _scope_from(headers: dict[str, str], default_account: str = "default") -> Sc
     account = validate_scope_id(head.get("x-hippocampus-account") or default_account)
     session = head.get("x-hippocampus-session") or head.get("x-session-id") or ""
     if not session:
-        session = "day-" + time.strftime("%Y%m%d")
+        bucketing = (bucketing or "day").lower()
+        if bucketing == "hour":
+            session = "hour-" + time.strftime("%Y%m%d%H")
+        elif bucketing == "none":
+            session = "default"
+        else:
+            session = "day-" + time.strftime("%Y%m%d")
     return Scope(account=account, session=session[:64], source="user")
 
 
@@ -108,7 +118,13 @@ def build_app(core: MemoryCore, *, confirm_block: bool = True, offline: bool = F
 
     @app.get("/v1/models")
     def models() -> dict[str, Any]:
-        return {"object": "list", "data": [{"id": "hippocampus", "object": "model", "owned_by": "local"}]}
+        """回**配置的**模型名（部分客户端会校验列表；占位串会让它们拒用）。
+
+        顺序：`llm.model`（或 `HIPPOCAMPUS_MODEL`／`OPENAI_MODEL`）→ 内置默认名。
+        注意列表里回的是"本代理接受并转发的模型名"，上游真实模型仍由 `llm.api_mode` 决定。
+        """
+        name = mem_config.endpoint_model() or "hippocampus"
+        return {"object": "list", "data": [{"id": name, "object": "model", "owned_by": "local"}]}
 
     async def _handle(request: Request, inbound: str):
         """三种入站格式共用的一条链（识别 → 鉴权 → 注入 → 转发 → 固化 → 追加确认块）。"""
@@ -128,12 +144,22 @@ def build_app(core: MemoryCore, *, confirm_block: bool = True, offline: bool = F
             )
         headers = dict(request.headers)
         try:
-            scope = _scope_from(headers)
+            scope = _scope_from(headers, bucketing=str(mem_config.proxy_config().get("session_bucketing") or "day"))
         except Exception as e:  # scope 头是外部输入：非法直接 400，不落到文件系统上
             return JSONResponse(
                 status_code=400,
                 content={"error": {"message": f"scope 标识非法: {e}", "type": "invalid_scope"}},
             )
+        # [A4] cache_control 透传开关：从该账户的**活跃参数快照**读（配置里改了要真的生效）。
+        # 它是一个进程级开关（转换器内部状态），代理是单机单账户进程，逐请求设置是安全的。
+        try:
+            from hippocampus.proxy import format_converters as _fc
+
+            _params = core.active_params(scope)
+            _fc.set_cache_control_passthrough(bool(_params.get("cache_control_passthrough", True)))
+        except Exception as e:  # 读参数失败不阻断转发（保持转换器上一次的开关值）
+            sys.stderr.write(f"[proxy] cache_control 开关读取失败（用默认开）: {e}\n")
+
         want_confirm = confirm_block and headers.get(CONFIRM_HEADER, "").lower() not in ("0", "false", "off")
         model = str(body.get("model") or mem_config.endpoint_model())
         stream = bool(body.get("stream"))

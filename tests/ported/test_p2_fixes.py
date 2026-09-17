@@ -103,7 +103,7 @@ def test_resource_plausible(tmp_path):
 
 
 def test_extract_response_filters_hallucinated_resource(session, monkeypatch):
-    """轨道B 提取到幻觉资源（路径全不存在）→ 不入库。"""
+    """观察轨提取到幻觉资源（路径全不存在）→ 不入库。"""
     fake_result = {
         "entities": [],
         "memories": [

@@ -112,6 +112,13 @@ def test_invalid_scope_header_rejected(core):
 
 
 def test_models_endpoint(core):
+    """`/v1/models` 回**配置的模型名**（A6，0.2.1 口径变更）。
+
+    此前回占位串 `hippocampus`——部分客户端会校验列表里有没有自己请求的模型名，
+    占位串会让它们拒用。现在回 `llm.model`（或环境变量），未配置时才回内置名。
+    """
+    from hippocampus import settings as mem_settings
+
     payload = _client(core).get("/v1/models").json()
     assert payload["object"] == "list"
-    assert payload["data"][0]["id"] == "hippocampus"
+    assert payload["data"][0]["id"] == (mem_settings.endpoint_model() or "hippocampus")

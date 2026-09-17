@@ -24,8 +24,10 @@ query_instruction；__call__（add/upsert/文档侧）不加。
 
 import json
 import os
+import re
 import sys
 import urllib.request
+from collections.abc import Callable
 from pathlib import Path
 
 from hippocampus.memory import runtime
@@ -50,7 +52,7 @@ _REQUIRED_FILES = (
 # 下载端点轮换顺序：HF_ENDPOINT 环境变量（若有）→ 官方 → hf-mirror 镜像
 _HF_ENDPOINTS = ("https://huggingface.co", "https://hf-mirror.com")
 
-_MAX_LENGTH = 512  # bge 系列序列长度上限
+_MAX_LENGTH = 384  # 序列长度上限（见 `_encode` 的说明）
 
 
 # ---------- 下载 ----------
@@ -67,6 +69,8 @@ def _sha256(path: Path) -> str:
 
 
 def _http_get(url: str, timeout: int = 60) -> bytes:
+    if _HTTP_FETCHER is not None:
+        return _HTTP_FETCHER(url, timeout)  # 注入式抓取器（URL 已被调用方校验）
     req = urllib.request.Request(url, headers={"User-Agent": "hippocampus-p02/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp:
         return resp.read()
@@ -75,7 +79,7 @@ def _http_get(url: str, timeout: int = 60) -> bytes:
 def _fetch_lfs_sha(endpoint: str, repo: str) -> dict:
     """从 HF API 拿 LFS 文件 sha256（{path: oid}）；API 异常返回 {}（跳过校验）。"""
     try:
-        url = f"{endpoint}/api/models/{repo}/tree/main?recursive=true"
+        url = _validate_model_url(f"{endpoint}/api/models/{repo}/tree/main?recursive=true", endpoint)
         data = json.loads(_http_get(url, timeout=30).decode("utf-8"))
         out = {}
         for item in data:
@@ -85,6 +89,59 @@ def _fetch_lfs_sha(endpoint: str, repo: str) -> dict:
         return out
     except Exception:
         return {}
+
+
+# ---- 出站校验与注入式抓取器（安全审计 N20-③，A41 口径）----
+# 结构与 `agent/tools.py::_fetch_url` 同款：**先校验、再交给抓取器**。
+# 本模块的 URL 由「配置端点 + 仓库名」拼出，两段都要过闸：
+#   · 端点：只允许 http/https（`validate_endpoint_url`；本地镜像/环回是操作员显式配置的，允许）；
+#   · 仓库名：白名单 `[A-Za-z0-9._-]`（不允许 `/`、`@`、`:`，因此无法改主机或跨路径）；
+#   · 最终 URL 的主机必须与端点主机一致（防"仓库名里塞主机"把请求引到别处）。
+# HF 仓库名是 `org/name` 或裸 `name`：两段都只允许 `[A-Za-z0-9._-]`，且每段不以 `.` 开头
+_REPO_SEGMENT_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9._-]{0,95}")
+
+# 抓取器可注入（测试与受限环境用）；None 时走模块内默认实现
+_HTTP_FETCHER: Callable[[str, int], bytes] | None = None
+
+
+def set_http_fetcher(fn: Callable[[str, int], bytes] | None) -> None:
+    """注入出站抓取器：`fn(url, timeout) -> bytes`。传入 None 恢复默认实现。
+
+    为什么要有：出站能力可被替换/关闭（受限环境、测试里断言"没有出站"），
+    且校验永远发生在**交给抓取器之前**（与 agent 工具同一条纪律）。
+    """
+    global _HTTP_FETCHER
+    _HTTP_FETCHER = fn
+
+
+def _safe_repo(repo: str) -> str:
+    """仓库名白名单（路径穿越与主机注入的第一道闸）。
+
+    只接受 `name` 或 `org/name`（各段 `[A-Za-z0-9._-]`、不以点开头、不含 `..`）——
+    因此 `/`、`@`、`:`、`..` 都进不来：既不能跨出 models 目录，也不能改 URL 主机。
+    """
+    name = str(repo or "")
+    parts = name.split("/")
+    if len(parts) > 2 or not parts or any(not _REPO_SEGMENT_RE.fullmatch(seg) for seg in parts):
+        raise ValueError(f"非法仓库名: {name!r}")
+    if any(".." in seg for seg in parts):
+        raise ValueError(f"非法仓库名（含 ..）: {name!r}")
+    return "/".join(parts)
+
+
+def _validate_model_url(url: str, endpoint: str = "") -> str:
+    """只允许 http/https；主机必须与端点一致；拒环回/私有/保留（端点自身例外）。"""
+    from urllib.parse import urlparse
+
+    from hippocampus.net import validate_endpoint_url
+
+    safe = validate_endpoint_url(url)
+    if endpoint:
+        want = urlparse(endpoint).hostname
+        got = urlparse(safe).hostname
+        if want and got != want:
+            raise ValueError(f"出站主机与端点不一致: {got!r} != {want!r}")
+    return safe
 
 
 def _endpoints() -> list:
@@ -97,13 +154,25 @@ def _endpoints() -> list:
 
 
 def _model_dir(repo: str) -> Path:
-    return runtime.data_root() / "models" / repo
+    """模型落盘目录。打比方：它是"公共工具库"，不是"谁的私人书架"——模型文件是所有
+    记忆库共享的只读资源，所以**永远放在全局默认数据根**，不跟随当前 core 的
+    `--home`。这保证：① 换 `--home` 不会重复下载几百兆；② 基准评测的临时数据根
+    （`--home D:/tmp/hc-bench/…`）不需要网络也能用已下好的模型。
+
+    安全（N20）：`runtime.default_data_root()` 是**机器级固定路径**，不含用户输入，
+    与仓库名白名单（`_safe_repo`）一起保证落盘路径不可被外部串改写。
+    """
+    return runtime.default_data_root() / "models" / _safe_repo(repo)
 
 
 def _download_repo(repo: str) -> Path:
     """下载必需文件到 models/<repo>/；model.onnx 按 API lfs.oid 校验 sha256。
 
-    全部端点失败抛 RuntimeError（调用方回退默认）。半成品跨端点清理。"""
+     全部端点失败抛 RuntimeError（调用方回退默认）。半成品跨端点清理。
+
+    安全（N20-③）：仓库名过白名单；每个下载 URL 先过 `_validate_model_url`
+    （只 http/https、主机必须等于端点主机）。"""
+    repo = _safe_repo(repo)
     target = _model_dir(repo)
     if all((target / f).exists() for f in _REQUIRED_FILES):
         return target
@@ -120,7 +189,7 @@ def _download_repo(repo: str) -> Path:
                 if dst.exists():
                     continue
                 dst.parent.mkdir(parents=True, exist_ok=True)  # 子目录（onnx/）也要建
-                url = f"{ep}/{repo}/resolve/main/{rel}"
+                url = _validate_model_url(f"{ep}/{repo}/resolve/main/{rel}", ep)
                 tmp = target / (rel + ".tmp")
                 _http_download(url, tmp)
                 if rel == "onnx/model.onnx" and expected_sha.get(rel):
@@ -138,6 +207,9 @@ def _download_repo(repo: str) -> Path:
 
 
 def _http_download(url: str, dst: Path, timeout: int = 180) -> None:
+    if _HTTP_FETCHER is not None:
+        dst.write_bytes(_HTTP_FETCHER(url, timeout))  # 注入式抓取器（URL 已被调用方校验）
+        return
     req = urllib.request.Request(url, headers={"User-Agent": "hippocampus-p02/1.0"})
     with urllib.request.urlopen(req, timeout=timeout) as resp, open(dst, "wb") as f:
         while True:
@@ -203,9 +275,22 @@ class ONNXEmbeddingFunction:
             self._session = None
 
     def _encode(self, texts: list) -> list:
+        """ONNX 推理。内存纪律写清楚（实测教训）：
+
+        - tokenizer 侧已 `enable_truncation(max_length=384)`，理论上不会有超长序列；
+          但仍在推理前做一次**硬截断**（按分词后长度切到 384），防止"某次配置被改掉"
+          或"别的 tokenizer 路径"把长序列送进来——实测症状是 onnxruntime 的
+          Rust 侧 `memory allocation of 2097152 bytes failed` **直接把进程炸掉**
+          （不是抛异常，是进程崩，没法 catch）。
+        - tokenizers 的 `encode_batch` 对长文本的内存是序列长度的**平方级**；
+          384 的上限是"召回不掉点"与"不爆内存"的折中（bge 类检索任务，384 足够）。
+        """
         encs = self._tokenizer.encode_batch(texts)
         import numpy as np
 
+        for enc in encs:
+            if len(enc.ids) > _MAX_LENGTH:
+                enc.truncate(_MAX_LENGTH)
         feed = {}
         for inp in self._session.get_inputs():
             name = inp.name
