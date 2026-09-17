@@ -14,7 +14,10 @@ Hippocampus 把"记忆"做成 agent 的核心能力，而不是外挂的检索�
 - **Agent 形态**：LangGraph 编排（think／act／answer）＋ LangChain 工具接入；检索决定
   上下文 → 执行 → 判分决定固化；三出口（完成／无法完成／需人工升级）；轨迹可复演。
 
-对外可插拔只限三点：**记忆后端**、**工具来源**（MCP）、**模型端点**（OpenAI 兼容）。
+对外可插拔目前落地的是**模型端点**（OpenAI 兼容，可换上游）；**记忆后端**（SQLite＋Chroma）
+与**工具来源**的可插拔见 `docs/roadmap.md` 的路线图。工具来源当前是 Agent 形态内置的固定
+工具集（写文件／列目录／记记忆／查记忆／搜岗位），**未做 MCP 等第三方工具接入**——不承诺
+"含 MCP"。
 
 ---
 
@@ -60,8 +63,11 @@ hippocampus demo --memories            # 一键跑评测题 + 记忆开/关对�
 
 ```bash
 hippocampus proxy --port 8765
+# 首次启动会生成实例令牌（<数据根>/instance_token；`hippocampus doctor` 显示前 8 位）：
+#   客户端请求带  Authorization: Bearer <完整令牌>，未带令牌回 401
 # 然后把客户端的 base_url 改成 http://127.0.0.1:8765
 #    OpenAI Chat：/v1/chat/completions   Responses：/v1/responses   Anthropic：/v1/messages
+# stream:true 时上游 SSE 逐行转发（真流式）；上游非 2xx 原样透传状态码与错误体
 ```
 
 Agent 形态：
@@ -96,7 +102,7 @@ export HIPPOCAMPUS_BASE_URL=https://api.deepseek.com   # 可选，也可写在 c
 ## 验证自己跑一遍
 
 ```bash
-python -m pytest tests/ -q            # 242 条（含随迁的记忆层测试）
+python -m pytest tests/ -q            # 334 条（含随迁的记忆层测试；C 盘紧张时加 --basetemp=D:/tmp/pt）
 python scripts/check_interface.py     # MemoryCore v1 契约（scope 第一参数／无 HTTP 字段／只追加）
 python scripts/audit_deps.py          # 依赖审计：全局单例残留必须为 0
 python scripts/scan_credentials.py    # 凭据扫描：零命中

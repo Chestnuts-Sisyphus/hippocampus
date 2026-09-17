@@ -46,6 +46,13 @@ SEED_ITEMS: list[SeedItem] = [
     # --- 事实 ---
     SeedItem("我的目标岗位方向是后端开发与基础设施", "fact", "fact", "方向是后端和基础设施", age_days=40),
     SeedItem("我每周三晚上固定留给项目开发", "fact", "fact", "周三晚上做项目", age_days=35),
+    SeedItem("我用 Obsidian 管理笔记", "fact", "fact", "Obsidian 笔记", age_days=25),
+    # --- 真实 JD 派生场景的答题要点（N8 新增；脱敏，不含私人 JD 原文） ---
+    SeedItem("我优先投 Python 技术栈的公司", "preference", "ordinary", "Python 生态", age_days=20),
+    SeedItem("我有记忆系统项目经验，会工具调用和多步任务", "fact", "fact", "agent 岗位答题要点", age_days=15),
+    SeedItem("我做记忆系统：记忆要长期保存、模型输出不能污染记忆、检索要保证召回", "fact", "fact", "记忆系统要点", age_days=12),
+    SeedItem("我做过向量检索与召回（记忆核心的语义通道）", "fact", "fact", "RAG 答题要点", age_days=10),
+    SeedItem("记忆系统有生命周期管理让记忆过期，离线固化保存长期记忆", "fact", "fact", "不遗忘答题要点", age_days=8),
     # --- 冲突对：同对象取值不同（新值应挂起确认，老值在裁决前保持生效） ---
     SeedItem("我的期望城市是北京", "preference", "conflict_old", "想去北京", age_days=45),
     SeedItem("我的期望城市是杭州", "preference", "conflict_new", "改主意了想去杭州", age_days=2),
@@ -67,7 +74,6 @@ KNOWN_RELEVANCE: dict[str, list[str]] = {
     "我想去哪个城市工作": ["我的期望城市是杭州"],
     "我的岗位方向是什么": ["我的目标岗位方向是后端开发与基础设施"],
 }
-
 
 def seed(core: MemoryCore, scope: Scope, *, as_of_ms: int | None = None, verbose: bool = False) -> dict[str, Any]:
     """把示例记忆灌进指定 scope。返回统计（供 CLI 打印与评测引用）。

@@ -6,6 +6,6 @@ Agent 形态（LangGraph 编排）。对外可插拔只限三点：记忆后端�
 
 from hippocampus.core import MemoryCore, Scope
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = ["MemoryCore", "Scope", "__version__"]

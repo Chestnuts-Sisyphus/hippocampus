@@ -1,14 +1,20 @@
-"""评测执行：跑题 → 判分 → 记忆开/关对照 → 标签双来源一致率。
+"""评测执行：跑题 → 判分 → 记忆开/关对照 → 标签双来源一致率 →（N8）pass^k／模型臂／关键词基线。
 
 两条臂（对照实验）：
 - **记忆开**：正常走（检索 → 注入 → 作答／动作）；
 - **记忆关**：`关闭记忆` 开关（只关注入，不关固化——开关语义来自前身），
   同一批题再跑一遍。
 
+N8 升级（C1–C4）：
+- **pass^k**：每题重复 k 次（默认 k=1；k≥3 时全过才算过），报 pass^k 分数；
+- **模型臂**：有模型端点时（非离线）同一套题走模型作答器（ModelPolicy）；
+- **关键词基线**：只按 BM25 关键词直查库（无四通道融合、无注入），作对照；
+- **来源分列**：报告按 synthetic／real-jd 分列题数（C2）。
+
 判分不是"像不像"，是**要点命中**：题目真值里列出的记忆要点是否出现在作答／动作产物里。
 失败按四类归因（检索未召回／参数错／未及时终止／工具错）。
 
-诚实边界写在报告里（report.BOUNDARY），随结果一起打印。
+诚实边界写在报告里（report.boundary，含 k 与模型名），随结果一起打印。
 """
 
 from __future__ import annotations
@@ -19,6 +25,7 @@ from hippocampus.agent.runner import run_task
 from hippocampus.core import MemoryCore, Scope
 from hippocampus.eval.questions import Question, questions_for
 from hippocampus.eval.report import ArmResult, EvalReport, QuestionResult
+from hippocampus.memory import retrieval as rt
 
 
 def _ensure_seeded(core: MemoryCore, scope: Scope) -> dict[str, Any]:
@@ -92,9 +99,17 @@ def _apply_setup(core: MemoryCore, scope: Scope, question: Question) -> None:
         core.confirm(scope, f"确认{candidate['num']}")
 
 
-def _run_question(core: MemoryCore, scope: Scope, question: Question, *, max_steps: int, workdir: Any) -> QuestionResult:
+def _run_question(
+    core: MemoryCore,
+    scope: Scope,
+    question: Question,
+    *,
+    max_steps: int,
+    workdir: Any,
+    offline: bool = True,
+) -> QuestionResult:
     _apply_setup(core, scope, question)
-    run = run_task(core, scope, question.text, offline=True, max_steps=max_steps, workdir=workdir)
+    run = run_task(core, scope, question.text, offline=offline, max_steps=max_steps, workdir=workdir)
     auto_label = [line for line in run.answer.split("；") if line.startswith("[")]
     ok, hit, missed, how = _judge(core, scope, question, run)
 
@@ -127,6 +142,7 @@ def _run_question(core: MemoryCore, scope: Scope, question: Question, *, max_ste
         auto_label=auto_label,
         answer=f"{run.answer}  [判分依据：{how}]",
         note=question.note,
+        source=question.source,
     )
 
 
@@ -149,6 +165,50 @@ def _label_agreement(results: list[QuestionResult], questions: dict[str, Questio
     return sum(scores) / len(scores), len(scores)
 
 
+def _keyword_baseline_arm(core: MemoryCore, scope: Scope, qs: list[Question]) -> ArmResult:
+    """关键词基线臂（C4/A19 对照）：只按 BM25 关键词直查库，无四通道融合、无注入。
+
+    对每题：BM25 检索题干 → 取 active 且非 shadow 的记忆 top-8 内容拼成"作答"，
+    判分＝要点子串覆盖。拒答题：无命中才算对。它量化"单纯关键词 vs 四通道融合"的增益。
+    """
+    arm = ArmResult(name="关键词基线")
+    session = core._session(scope)  # noqa: SLF001 - 评测是内部工具
+    idx = rt.build_bm25(session.conn)
+    for q in qs:
+        hits = rt.bm25_search(idx, q.text)
+        contents: list[str] = []
+        for doc_id in hits:
+            if str(doc_id).startswith("ep_"):
+                continue
+            row = session.conn.execute(
+                "SELECT content, status, shadow FROM memories WHERE id=?", (doc_id,)
+            ).fetchone()
+            if row and row["status"] == "active" and not (row["shadow"] or 0):
+                contents.append(row["content"])
+        text = "\n".join(contents)
+        if q.check == "refusal":
+            ok = not contents
+        else:
+            ok = bool(q.expect) and all(e in text for e in q.expect)
+        arm.results.append(
+            QuestionResult(
+                qid=q.qid,
+                kind=q.kind,
+                source=q.source,
+                ok=ok,
+                steps=1,
+                answer=f"[关键词基线]\n{text[:200]}",
+                note="仅 BM25 关键词直查库（无四通道融合）",
+            )
+        )
+        arm.total += 1
+        arm.steps += 1
+        if ok:
+            arm.passed += 1
+    arm.pass_k_score = arm.success_rate
+    return arm
+
+
 def run_bundle(
     core: MemoryCore,
     scope: Scope,
@@ -158,26 +218,44 @@ def run_bundle(
     offline: bool = True,
     max_steps: int = 6,
     workdir: Any = None,
+    pass_k: int = 1,
+    model_arm: bool = False,
+    baseline: bool = False,
 ) -> EvalReport:
-    """跑一批题。`memories=True` 时额外跑"记忆关"对照臂。"""
+    """跑一批题。`memories=True` 时额外跑"记忆关"对照臂。
+
+    N8（C1–C4）：
+    - `pass_k`：每题重复 k 次（默认 1），全过才算过，报 pass^k 分数；
+    - `model_arm`：有模型端点（非离线）时同一套题走模型作答器；
+    - `baseline`：加"关键词基线"对照臂（仅 BM25 直查库）。
+    """
     qs = questions_for(questions)
     qmap = {q.qid: q for q in qs}
     seed_info = _ensure_seeded(core, scope)
-    report = EvalReport(mode="offline" if offline else "model")
+    report = EvalReport(mode="offline" if offline else "model", pass_k=max(int(pass_k), 1),
+                        baseline=baseline, model_arm=model_arm)
     report.notes.append(f"示例数据：本次新灌 {seed_info.get('count', 0)} 条（合成数据，含已知真值）")
 
-    def _arm(name: str) -> ArmResult:
-        arm = ArmResult(name=name)
+    def _arm(name: str, use_offline: bool = True) -> ArmResult:
+        arm = ArmResult(name=name, pass_k=max(int(pass_k), 1))
         for q in qs:
-            q_scope = Scope(account=scope.account, session=f"eval-{q.qid}")
-            result = _run_question(core, q_scope, q, max_steps=max_steps, workdir=workdir)
+            runs: list[QuestionResult] = []
+            for i in range(max(int(pass_k), 1)):
+                q_scope = Scope(account=scope.account, session=f"eval-{q.qid}-{i}")
+                runs.append(_run_question(core, q_scope, q, max_steps=max_steps, workdir=workdir, offline=use_offline))
+            ok_all = all(r.ok for r in runs)
+            result = runs[0]
+            result.ok = ok_all
+            if arm.pass_k > 1:
+                result.note = (result.note + f" | pass^{arm.pass_k}: {sum(r.ok for r in runs)}/{len(runs)}").strip()
             arm.results.append(result)
             arm.total += 1
             arm.steps += result.steps
-            if result.ok:
+            if ok_all:
                 arm.passed += 1
             else:
                 arm.failures[result.failure or "未归类"] = arm.failures.get(result.failure or "未归类", 0) + 1
+        arm.pass_k_score = arm.success_rate
         return arm
 
     on_arm = _arm("记忆开")
@@ -192,6 +270,31 @@ def run_bundle(
             core.set_switch(scope, "打开记忆")
         report.arms.append(off_arm)
 
+    # N8：关键词基线对照（C4/A19）
+    if baseline:
+        report.arms.append(_keyword_baseline_arm(core, scope, qs))
+
+    # N8：模型臂（C3）——有端点且非离线时才跑；请求了但条件不满足就明说原因
+    if model_arm:
+        if offline:
+            report.notes.append("模型臂跳过：离线档（--offline）")
+        else:
+            from hippocampus.settings import endpoint_model, llm_available
+
+            if llm_available():
+                report.model = endpoint_model()
+                report.arms.append(_arm(f"模型臂（{report.model}）", use_offline=False))
+            else:
+                report.notes.append("模型臂跳过：未配置模型端点（无凭据）")
+
+    # 边界声明动态化：含 k 与模型名（C1 口径：边界声明必须含 k 与模型名）
+    model_part = f"模型臂={report.model or '无（离线规则作答器）'}"
+    report.boundary = (
+        f"边界声明：题量 {len(qs)}（{sum(1 for q in qs if q.kind == 'qa')} 问 "
+        f"{sum(1 for q in qs if q.kind == 'tool')} 动作）；pass^k 的 k={report.pass_k}；{model_part}；"
+        "来源分列：synthetic=合成示例数据（证方法可复现），real-jd=真实岗位 JD 派生场景"
+        "（**脱敏**，不含私人 JD 原文）；效果结论不作普适承诺。"
+    )
     return report
 
 

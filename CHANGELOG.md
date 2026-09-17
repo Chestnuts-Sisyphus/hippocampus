@@ -3,6 +3,63 @@
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)；
 `MemoryCore` 接口自 v1 起**只允许追加字段**（见 `docs/memory-core-v1.md`）。
 
+## [0.2.0] — 2026-09-17
+
+第二个版本：把"移植了但没接线"的守卫接进生产路径，补齐流式／鉴权／审计／评测四块，
+并给仓库打上第一个版本标签。**接口仍为 v1（只追加：`Injection.note`）。**
+
+### 新增
+
+- **轮末与维护守卫接线**：`retrieval_guard`（语义命中但实体未命中 → 轮末补实体、
+  只加不删）、`missed_extract`（孤立经历补实体，≤3 次，第 3 次仍空标
+  `no_entity_confirmed`）接进 `MemoryCore.consolidate` 轮末；`disambiguate`
+  （实体消歧第二层）同路径软失败降级；`hub_guard`（mega-hub 标记）接进维护扫描。
+  三类新测试：补实体生效／孤立经历补实体／守卫失败不阻断。
+- **索引健康可诊断**：`doctor` 增"索引健康"行（chroma 目录可写性＋集合条数 vs
+  库内 active 条数＋索引积压队列＋上次同步错误）；索引同步/检索失败不再静默——
+  `inject_finalize` 的 `note` 携带告警（v1 追加字段），chroma 不可写时明确报出。
+- **AuditSink 旁路审计**（A18 完整形态）：每次注入旁路记录 **top-N=50 候选全集**
+  （doc_id／通道／分数／已注入／被剔理由）到账户目录 `audit.jsonl`，超限只记计数；
+  开关 `audit_enabled`（默认开）。`explain` 升级：能答"那条为什么没进"（含超出
+  检索 top-k 的候选），并把 `observe.jsonl`（注入/确认事件）与轨迹合并成一份 run 视图。
+- **pending TTL（A35）**：未决确认块默认 **7 天** TTL，超时标记"未决冲突"落库、
+  旧值保持生效、新候选保持候选态；超时块不再回到 pending 队列。
+- **`memory review`**：`--pending`（未决块＋TTL 剩余）／`--candidates`（可疑候选）／
+  `--suspicious`（安全标记＋候选＋TTL 未决冲突）三个视图。
+- **真·流式转发（A1）**：客户端 `stream:true` 时逐行转发上游 SSE（chat／anthropic／
+  responses 三种上游格式各一条测试），每个文本增量一个 delta 事件；**流结束后仍完成
+  固化**；确认块作为**末尾 delta** 追加。
+- **代理鉴权（A2）**：实例令牌首次启动生成并落盘（`<数据根>/instance_token`），
+  请求需带 `Authorization: Bearer <令牌>`，否则 401；`doctor` 只显示前 8 位。
+- **上游错误透传（A3）**：上游非 2xx **原样透传状态码与错误体**（不再统一包成 502）。
+- **评测升级（C1–C4）**：题集扩到 **20 题**（14 问 6 动作；含 real-jd 真实岗位 JD
+  派生场景，**脱敏**）；**pass^k**（`--pass-k`，每题重复 k 次全过才算过）；
+  **模型臂**（`--model`，有端点时同一套题走模型作答器）；**关键词基线对照**（`--baseline`，
+  仅 BM25 直查库）；报告分列 synthetic／real-jd，边界声明含 k 与模型名。
+- **一键演示脚本**：`scripts/demo.sh`＋`scripts/demo.ps1`（起代理 → 灌数据 →
+  三格式请求 → 跑评测 → 出结果表；离线可跑、无弹窗）。
+
+### 修复
+
+- **`MemoryCore.close()` 泄漏索引句柄**：此前只关 SQLite 连接、不关向量库客户端，
+  长进程（或一条测试套件）跑几百个实例后触发 `OSError: Too many open files`
+  （实测拖垮真实服务器测试）。现在连向量库客户端一起关。
+- **离线档 responses 入站回执丢正文**：曾只回 `{"model": ...}`；现在按响应适配器
+  构造完整回执（含 `output[].content[].text`）。
+- **请求体非法 JSON 回 500**：现在明确回 400（含编码问题提示）。
+
+### 变更（口径）
+
+- README 的"可插拔三点（含 MCP）"改为如实表述：**未做 MCP 等第三方工具接入，
+  不承诺"含 MCP"**（MCP 接入列为明确不做，见 `docs/roadmap.md` §六）。
+- `docs/roadmap.md` 同步本轮完成项与取消项。
+
+### 已知限制
+
+- MCP 工具接入：不做（已从承诺移除）。
+- 记忆后端仍写死 SQLite＋Chroma（可替换后端列入后续版本）。
+- 评测效果结论只对合成/脱敏样本成立，不作普适承诺。
+
 ## [0.1.0] — 2026-09-17
 
 首个可运行版本（alpha）。记忆核心取自既有实现的抽取式移植（机制未简化），

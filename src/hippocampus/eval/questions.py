@@ -35,6 +35,11 @@ class Question:
     #   ""              不需要
     #   "resolve_pending" 先把示例数据里的冲突挂起做出裁决（q04 测的是"裁决之后"的行为）
     setup: str = ""
+    # 数据来源（C2，报告分列"合成/真实"）：
+    #   synthetic  合成示例数据（seed 生成，证方法可复现）
+    #   real-jd    真实岗位 JD 派生场景（**脱敏**：不包含任何私人 JD 原文，只保留
+    #               招聘方普遍考察的 agent 能力要求，如记忆/工具/拒答/多步任务）
+    source: str = "synthetic"
 
 
 QUESTIONS: list[Question] = [
@@ -111,6 +116,83 @@ QUESTIONS: list[Question] = [
         expect=["我只看允许远程的岗位"],
         tool="write_file",
         note="写文件＝危险动作，需确认——判分看**产物**：写出的文件里有这条内容",
+        check="file_written",
+    ),
+    # ---- 第二轮（N8 扩到 20 题；real-jd = 真实 JD 派生场景，脱敏）----
+    Question(
+        "q11",
+        "我有哪些记忆系统项目经验？",
+        QA,
+        expect=["我有记忆系统项目经验", "会工具调用和多步任务"],
+        note="real-jd：agent 岗位普遍要求记忆/工具调用经验（脱敏场景）",
+        source="real-jd",
+    ),
+    Question(
+        "q12",
+        "我做记忆系统的核心要点是什么？",
+        QA,
+        expect=["记忆要长期保存", "模型输出不能污染记忆", "检索要保证召回"],
+        note="real-jd：跨会话记忆是 agent 岗高频考点（脱敏场景）",
+        source="real-jd",
+    ),
+    Question(
+        "q13",
+        "我对候选岗位的技术栈有什么偏好？",
+        QA,
+        expect=["我优先投 Python 技术栈的公司"],
+    ),
+    Question(
+        "q14",
+        "我做过向量检索与召回吗？",
+        QA,
+        expect=["我做过向量检索与召回"],
+        note="real-jd：JD 里的 RAG 要求对应我的记忆核心检索经验（脱敏）",
+        source="real-jd",
+    ),
+    Question(
+        "q15",
+        "我的理想薪资是多少？",
+        QA,
+        expect=[],
+        note="负样本对照：记忆里没有薪资信息，正确行为是拒答（不许编）",
+        check="refusal",
+        source="real-jd",
+    ),
+    Question(
+        "q16",
+        "我平时用什么工具管理笔记？",
+        QA,
+        expect=["我用 Obsidian 管理笔记"],
+    ),
+    Question(
+        "q17",
+        "我的记忆系统怎么让记忆不过期？",
+        QA,
+        expect=["生命周期管理让记忆过期", "离线固化保存长期记忆"],
+        note="real-jd：'怎么让 agent 不遗忘'是 agent 岗高频考点（脱敏场景）",
+        source="real-jd",
+    ),
+    Question(
+        "q18",
+        "把'我优先投 Python 技术栈的公司'记下来并确认已入库",
+        TOOL,
+        expect=["我优先投 Python 技术栈的公司"],
+        tool="remember",
+        check="memory_exists",
+    ),
+    Question(
+        "q19",
+        "列出我关于岗位筛选的全部偏好",
+        TOOL,
+        expect=["我只看允许远程的岗位", "我不投需要长期出差的岗位", "我优先投 Python 技术栈的公司"],
+        tool="list_memories",
+    ),
+    Question(
+        "q20",
+        "把'我的技术栈偏好'整理成一个 markdown 文件",
+        TOOL,
+        expect=["我优先投 Python 技术栈的公司"],
+        tool="write_file",
         check="file_written",
     ),
 ]
