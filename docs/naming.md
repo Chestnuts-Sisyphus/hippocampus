@@ -9,7 +9,7 @@
 | # | 资源 | 实测命令 | 结果 | 结论 |
 |---|---|---|---|---|
 | 1 | **项目名 / 仓库名** | `gh repo view Chestnuts-Sisyphus/hippocampus` | `200`（PUBLIC） | **`Chestnuts-Sisyphus/hippocampus` 已启用**（由 `hippocampus-agent` 改名而来；GitHub 对旧 URL 自动重定向） |
-| 1b | 改名前置条件 | `gh api repos/Chestnuts-Sisyphus/Hippocampus` | 存在但 `size=0KB`、**零提交**（2026-08-08 建的占位仓） | 已改名为 `hippocampus-placeholder` 让出名字（空仓，可随时删除） |
+| 1b | 改名前置条件 | `gh api repos/Chestnuts-Sisyphus/Hippocampus` | 存在但 `size=0KB`、**零提交**（2026-08-08 建的占位仓） | 该空占位仓**已按栗子指示删除**（删除前复核：size=0／无分支／无提交；删除返回 204） |
 | 2 | **CLI 命令名** | `hippocampus --help`（本机 `Scripts/` 无同名可执行文件） | 无冲突 | **`hippocampus` 可用** |
 | 3 | **import 包名** | `import hippocampus` | 正常 | **`hippocampus` 可用** |
 | 4 | **默认端口** | `netstat -ano \| grep :8765` | 无监听 | **8765 空闲** |
@@ -24,10 +24,11 @@
 | CLI 命令 | `hippocampus` | `[project.scripts]` 不变 |
 | import 包名 | `hippocampus` | 不变 |
 | 默认端口 | `8765` | 写入 `config.py` 的 `DEFAULT_PORT`，由 `hippocampus doctor` 打印实际值 |
-| **PyPI 分发名** | **`hippocampus-memory`** | 唯一"被迫不同"的一处：PyPI 的 `hippocampus` 是别人的包；分发名只在 `pip install` / `pip show` 出现（PyPI 发布本身列投递后可选） |
+| **PyPI 分发名** | **`hippocampus-agent`**（栗子指定） | 唯一"被迫不能取裸名"的一处：PyPI 的 `hippocampus` 是别人的包（实测见上表第 5 行）。分发名只在 `pip install` / `pip show` 出现，项目名／仓库／CLI／import 包名都还是 Hippocampus |
 
-> 为什么不用 `hippocampus-agent` 继续当分发名：栗子明确不喜欢 `-agent` 后缀，
-> 而分发名会在 `pip show` 里露脸；`hippocampus-memory` 既避开被占名，也与"记忆是核心"一致。
+> **为什么分发名不能是裸 `hippocampus`**：那是第三方的 sqlite memoization 包。
+> 若把分发名写成 `hippocampus`，读者照 README 敲 `pip install hippocampus` 会装到别人的东西——
+> 这是真实踩坑，所以分发名取 `hippocampus-agent`。
 
 ## 三、复跑
 
@@ -37,8 +38,8 @@ curl -s -o /dev/null -w "new repo: %{http_code}\n" https://github.com/Chestnuts-
 curl -s -o /dev/null -w "old repo: %{http_code}（301/302=已重定向）\n" -I https://github.com/Chestnuts-Sisyphus/hippocampus-agent
 
 # PyPI
-curl -s -o /dev/null -w "pypi hippocampus:        %{http_code}（200=被占）\n" https://pypi.org/pypi/hippocampus/json
-curl -s -o /dev/null -w "pypi hippocampus-memory: %{http_code}（404=可用）\n" https://pypi.org/pypi/hippocampus-memory/json
+curl -s -o /dev/null -w "pypi hippocampus:        %{http_code}（200=被占，故分发名不能取裸名）\n" https://pypi.org/pypi/hippocampus/json
+curl -s -o /dev/null -w "pypi hippocampus-agent:  %{http_code}（404=可用，本项目分发名）\n" https://pypi.org/pypi/hippocampus-agent/json
 
 # 端口
 netstat -ano | grep -E ":8765\b" || echo "8765 free"

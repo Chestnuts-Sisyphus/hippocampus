@@ -20,7 +20,7 @@ Hippocampus 把"记忆"做成 agent 的核心能力，而不是外挂的检索�
 
 ```bash
 # 安装（三选一；尚未发布 PyPI，所以前两条是现在能用的路径）
-pip install "hippocampus-memory[vector,proxy] @ git+https://github.com/Chestnuts-Sisyphus/hippocampus"
+pip install "hippocampus-agent[vector,proxy] @ git+https://github.com/Chestnuts-Sisyphus/hippocampus"
 #   或：把源码目录拷到本机后  pip install -e "/path/to/hippocampus[vector,proxy]"
 #   或（不装，只跑）：          PYTHONPATH=/path/to/hippocampus/src python -m hippocampus.cli doctor
 
@@ -29,9 +29,10 @@ hippocampus seed                       # 灌入示例数据（含已知真值：
 hippocampus demo --memories            # 一键跑评测题 + 记忆开/关对照
 ```
 
-> 项目名是 **Hippocampus**，CLI 与 import 包名同样是 `hippocampus`；
-> 只有**分发名**（`pip show` 里那一行）是 `hippocampus-memory`——PyPI 上的
-> `hippocampus` 已被第三方占用（同名 memoization 包），见 [docs/naming.md](docs/naming.md)。
+> 项目名是 **Hippocampus**，CLI 与 import 包名同样是 `hippocampus`，仓库也是 `…/hippocampus`；
+> 只有 **PyPI 分发名**（`pip install` / `pip show` 里那一串）是 `hippocampus-agent`——
+> 裸名 `hippocampus` 在 PyPI 上属于第三方（同名 memoization 包），
+> 那样写会让 `pip install hippocampus` 装错东西。实测记录见 [docs/naming.md](docs/naming.md)。
 
 > 两条路径都实测过：**无 git 环境**（把源码树拷过去 + `pip install --offline -e .`）
 > 与**无网**（不装 `[vector]`：语义通道降级、其余通道照常，`doctor` 会明说）。

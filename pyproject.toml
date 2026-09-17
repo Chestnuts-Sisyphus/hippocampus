@@ -3,11 +3,12 @@ requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [project]
-# 项目名是 **Hippocampus**；这里的分发名（distribution name）另取 `hippocampus-memory`，
-# 原因是 PyPI 上的 `hippocampus` 已被第三方占用（Pascal Jürgens 的 sqlite memoization 包，
-# 见 docs/naming.md 的实测记录）。分发名只在 `pip install` / `pip show` 里出现，
-# 项目名、CLI（`hippocampus`）、import 包名（`hippocampus`）、仓库名都还是 Hippocampus。
-name = "hippocampus-memory"
+# 项目名（README／CLI／import 包／仓库）是 **Hippocampus**；这里是 PyPI 上的**分发名**，
+# 按栗子指定取 `hippocampus-agent`。两点要知道：
+#   ① 裸名 `hippocampus` 不能用作分发名——PyPI 上那是别人的包（sqlite memoization），
+#      写它会让 `pip install hippocampus` 装到第三方的东西（见 docs/naming.md 实测）；
+#   ② 分发名只在 `pip install` / `pip show` 出现，不影响项目名与命令行。
+name = "hippocampus-agent"
 version = "0.1.0"
 description = "以记忆为核心的 agent 运行时：记忆核心 + 代理形态 + Agent 形态"
 readme = "README.md"
