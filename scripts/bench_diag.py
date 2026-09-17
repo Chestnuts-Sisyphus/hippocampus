@@ -36,6 +36,29 @@ def _norm_ctx(text: str) -> str:
     return pb.normalize_text(text or "")
 
 
+def classify_miss(turn_norms: list[str], ctx: str, evidence_turn_idxs: list[int]) -> tuple[bool, bool]:
+    """未命中题的邻居/同会话判据（E3/G8：**整句精确匹配**，不再用短前缀）。
+
+    旧版用 40/60 字符前缀判"轮在上下文"——前缀可能撞上别的轮或别的注入内容，
+    把"邻居已在上下文"高估（这也是 ±1 轮扩展上界 +22.5pp 的来源之一）。
+    现在改为 normalize 后**整句**在上下文里才算"在"：
+    - `neighbor_in_ctx`：证据轮的上一轮/下一轮整句在上下文；
+    - `same_session_in_ctx`：同会话**另有其它轮**（排除证据轮自身）整句在上下文。
+
+    返回 (neighbor_in_ctx, same_session_in_ctx)。注意：整句匹配要求注入内容=原文整句
+    （基准导入口径按原文整句落库，满足），若记忆被截断会**低估**——宁可低估不高估。
+    """
+    ctx_set = {t for t in turn_norms if t and t in ctx}
+    nb_hit = False
+    for i in evidence_turn_idxs:
+        for j in (i - 1, i + 1):
+            if 0 <= j < len(turn_norms) and turn_norms[j] and turn_norms[j] in ctx:
+                nb_hit = True
+    ev_set = {turn_norms[i] for i in evidence_turn_idxs if i < len(turn_norms)}
+    other = ctx_set - ev_set
+    return nb_hit, bool(other)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="LoCoMo 失败归因诊断（离线档）")
     parser.add_argument("--data", required=True)
@@ -85,17 +108,12 @@ def main(argv: list[str] | None = None) -> int:
                     hit += 1
                     rows.append({"qid": item.qid, "category": item.category, "status": "hit"})
                     continue
-                # 证据轮在会话中的下标（按文本前缀匹配）
+                # 证据轮在会话中的下标（按文本前缀匹配；精判据在 classify_miss 里）
                 idxs = []
                 for i, tn in enumerate(turn_norms):
                     if any(tn[:80].startswith(e[:60]) or e[:60] in tn[:80] for e in ev):
                         idxs.append(i)
-                nb_hit = False
-                for i in idxs:
-                    for j in (i - 1, i + 1):
-                        if 0 <= j < len(turn_norms) and turn_norms[j][:60] and turn_norms[j][:60] in ctx:
-                            nb_hit = True
-                sess_hit = any(tn[:40] and tn[:40] in ctx for tn in turn_norms)
+                nb_hit, sess_hit = classify_miss(turn_norms, ctx, idxs)
                 if nb_hit:
                     miss_prev_next += 1
                 elif sess_hit:

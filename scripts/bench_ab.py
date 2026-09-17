@@ -77,11 +77,18 @@ def apply_variant(variant: dict) -> None:
 
 
 def _already_ingested(core: MemoryCore, scope: Scope) -> bool:
-    """该账户库里已有记忆 → 视为导入过（`--reuse-import` 复用上一次导入）。"""
+    """该账户库里已有记忆/经历 → 视为导入过（`--reuse-import` 复用上一次导入）。
+
+    G10/E5：**memories＋episodes 双表都要看**——基准导入口径按 `split_pools=True`
+    把用户轮落记忆条、助手轮落经历层（事件），只查 memories 会把"只有助手轮的对话"
+    误判成没导入，`--reuse-import` 就会重复导入（向量库重复计数）。
+    """
     try:
         session = core._session(scope)  # noqa: SLF001
         with session.lock:
-            row = session.conn.execute("SELECT COUNT(*) AS c FROM memories").fetchone()
+            row = session.conn.execute(
+                "SELECT (SELECT COUNT(*) FROM memories) + (SELECT COUNT(*) FROM episodes) AS c"
+            ).fetchone()
             return bool(row and row["c"])
     except Exception:
         return False

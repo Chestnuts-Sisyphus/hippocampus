@@ -229,8 +229,17 @@ def _download_repo(repo: str) -> Path:
             last_err = e
             for rel in _REQUIRED_FILES:
                 (target / rel).unlink(missing_ok=True)
+                # G11/E6：半成品 .tmp 也清掉，空子目录（onnx/）一并收拾，不留误导性残留
+                (target / (rel + ".tmp")).unlink(missing_ok=True)
+            for d in sorted({(target / rel).parent for rel in _REQUIRED_FILES}, key=lambda p: -len(str(p))):
+                try:
+                    d.rmdir()  # 只在空时删；有内容（其它文件）时抛 OSError 忽略
+                except OSError:
+                    pass
             print(f"[warning] embedding 下载端点 {ep} 失败: {e}", file=sys.stderr)
-    raise RuntimeError(f"embedding 模型 {repo} 下载失败（全部端点）: {last_err}")
+    raise RuntimeError(
+        f"embedding 模型 {repo} 下载失败（已重试镜像，{len(_endpoints())} 个端点全部失败）: {last_err}"
+    )
 
 
 def _http_download(url: str, dst: Path, timeout: int = 180) -> None:
