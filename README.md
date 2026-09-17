@@ -1,7 +1,17 @@
 # 🧠 Hippocampus
 
-> **Cross-session memory for agents** — one memory core (`MemoryCore`), two consumption forms
-> (a drop-in proxy and a LangGraph agent), measured on public benchmarks with official judging.
+[![ci](https://github.com/Chestnuts-Sisyphus/hippocampus/actions/workflows/ci.yml/badge.svg)](https://github.com/Chestnuts-Sisyphus/hippocampus/actions/workflows/ci.yml)
+[![release](https://img.shields.io/github/v/release/Chestnuts-Sisyphus/hippocampus)](https://github.com/Chestnuts-Sisyphus/hippocampus/releases)
+[![license](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+[![python](https://img.shields.io/badge/python-3.11%20%7C%203.12-blue.svg)](pyproject.toml)
+[![runtime deps](https://img.shields.io/badge/runtime%20deps-4-brightgreen.svg)](pyproject.toml)
+
+**Cross-session memory for agents — one memory core (`MemoryCore`), two consumption forms,
+measured on public benchmarks with official judging.**
+
+[中文说明](README.zh-CN.md) · [Mechanism](docs/memory-core-v1.md) · [Architecture](#-architecture) · [Running it](#-quick-start) · [Security](docs/security.md)
+
+---
 
 Hippocampus treats memory as the **core capability of an agent**, not a bolt-on retrieval library:
 conversations land in a structured store, and every later request is answered against the *right*
