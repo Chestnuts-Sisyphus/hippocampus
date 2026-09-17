@@ -1,4 +1,4 @@
-# Hippocampus 一键演示（F2，Windows PowerShell）：起代理 → 灌数据 → 三格式请求 → 跑评测 → 出结果表。
+﻿# Hippocampus 一键演示（F2，Windows PowerShell）：起代理 → 灌数据 → 三格式请求 → 跑评测 → 出结果表。
 #
 # 用法：
 #   powershell -ExecutionPolicy Bypass -File scripts\demo.ps1

@@ -8,7 +8,7 @@
     chat      Agent 形态：跑一个任务（--offline 时只做记忆管理与检索问答）
     replay    用记录重跑一个轨迹（不是播放录像）
     explain   解释某一步注入了什么、为什么没注入别的（含 top-50 审计候选）
-    memory    list／pending／candidates／review（--pending/--candidates/--suspicious）／off
+    memory    list／pending／candidates／review（--candidates/--pending/--suspicious；默认视图= candidates，将弃用）／off
     learning  off／on（学习开关）
 
 设计纪律：不弹窗、不抢焦点；所有输出走 stdout/stderr，长任务写文件而不是开窗口。
@@ -254,6 +254,24 @@ def cmd_explain(args: argparse.Namespace) -> int:
 # ----------------------------------------------------------------------
 
 
+def _render_candidates(core: MemoryCore, scope: Scope, args: argparse.Namespace) -> None:
+    """`memory candidates`（及 review 默认视图）的渲染：候选列表 + 可选审计计数（A11/A12）。"""
+    items = core.list_memories(scope, limit=args.limit, status="candidate", include_shadow=True)
+    if not items:
+        print("（无可疑候选）")
+    for item in items:
+        print(f"  [{item.kind}] {item.content}   id={item.id}  （等确认，未参与注入/去重）")
+    if not args.audit:
+        return
+    audit = core.candidate_audit(scope)
+    print(f"候选审计：{audit['candidates']}/{audit['total_memories']} 条"
+          f"（占比 {audit['share_pct']}%），按类型 {audit['by_kind']}，"
+          f"滞留 {audit['by_age_days']}，超过 7 天未裁决 {audit['stale_candidates']}，"
+          f"未决确认块 {audit['unresolved_blocks']}")
+    if audit["sample_ids"]:
+        print("  抽样（人工复核）：" + ", ".join(audit["sample_ids"]))
+
+
 def cmd_memory(args: argparse.Namespace) -> int:
     core = _core(args)
     scope = _scope(args)
@@ -292,14 +310,6 @@ def cmd_memory(args: argparse.Namespace) -> int:
             print(f"  [{row['num']}]（{row['kind']}）{row['content']}  -- {whose}   id={row['id']}")
         return 0
 
-    if action == "candidates":
-        items = core.list_memories(scope, limit=args.limit, status="candidate", include_shadow=True)
-        if not items:
-            print("（无可疑候选）")
-        for item in items:
-            print(f"  [{item.kind}] {item.content}   id={item.id}  （等确认，未参与注入/去重）")
-        return 0
-
     if action == "review":
         if args.suspicious:
             rows = core.suspicious(scope)
@@ -320,12 +330,15 @@ def cmd_memory(args: argparse.Namespace) -> int:
                     whose = "新记录" if e["is_new"] else "旧记录"
                     print(f"    [{e['num']}]（{e['kind']}）{e['content']}  -- {whose}   id={e['id']}")
             return 0
-        # 默认视图 = candidates（可疑候选）
-        items = core.list_memories(scope, limit=args.limit, status="candidate", include_shadow=True)
-        if not items:
-            print("（无可疑候选）")
-        for item in items:
-            print(f"  [{item.kind}] {item.content}   id={item.id}  （等确认，未参与注入/去重）")
+        # 默认视图 = candidates（A11：弃用提示由下方统一打）
+
+    if action in ("candidates", "review"):
+        # A11：`memory candidates` 是唯一入口；`memory review` 的默认视图保留为别名，
+        # 打弃用提示（--pending/--suspicious 分支在上面已处理）。
+        if action == "review":
+            print("提示：`memory review`（无参数）与 `memory candidates` 同义，已弃用，请用 `memory candidates`。",
+                  file=sys.stderr)
+        _render_candidates(core, scope, args)
         return 0
 
     if action in ("delete", "forget"):
@@ -413,6 +426,9 @@ def cmd_bench(args: argparse.Namespace) -> int:
         concurrency=args.concurrency,
         retries=args.retries,
         timeout_s=args.timeout_s,
+        neighbor_expand=args.neighbors,
+        neighbor_budget=args.neighbor_budget,
+        english_entities=args.english_entities,
     )
     print()
     print(public_bench.render(report))
@@ -558,6 +574,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--status")
     p.add_argument("--all-status", action="store_true", help="不过滤状态（含 superseded/archived）")
     p.add_argument("--include-shadow", action="store_true", help="含模型观察轨")
+    p.add_argument("--audit", action="store_true", help="candidates/review：输出候选错分审计计数（A12）")
     p.add_argument("--pending", action="store_true", help="review：未决确认块（含 TTL 剩余）")
     p.add_argument("--suspicious", action="store_true", help="review：可疑项（安全标记/未决/TTL 冲突）")
     p.set_defaults(func=cmd_memory)
@@ -589,6 +606,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--retries", type=int, default=2, help="模型臂失败重试次数（默认 2）")
     p.add_argument("--timeout-s", type=float, default=120.0, help="模型臂单调用超时秒数（默认 120）")
     p.add_argument("--dup-pools", action="store_true", help="消融：每轮两处都落（旧口径，同句占两个注入位）")
+    p.add_argument("--neighbors", action="store_true", help="A1/T7：±1 轮邻居扩展（基础注入后追加已注入轮的相邻轮）")
+    p.add_argument("--neighbor-budget", type=int, default=6, help="邻居扩展追加预算（默认 6 条，只裁剪追加量）")
+    p.add_argument("--english-entities", action="store_true", help="A4/T8：导入时机械抽取英文专名挂图通道（A/B 开关）")
     p.set_defaults(func=cmd_bench)
 
     p = sub.add_parser("export", help="导出记忆库为目录包（manifest + memory.db）")
