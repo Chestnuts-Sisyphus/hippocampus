@@ -77,3 +77,10 @@ python scripts/calibrate.py --model onnx:bge-small-zh-v1.5
 
 > 边界声明：以上样本是**合成示例数据**（含已知真值），只证"方法可复现"；
 > 效果结论只来自真实数据，且单列为运行史，不作普适承诺。
+
+## E4/G9 风险登记（2026-09-18 · 未处理、已声明）
+
+**e5 前缀型模型未处理**：e5 系模型官方用法要求文档侧加 `passage: `、查询侧加 `query: ` 前缀；
+本项目嵌入函数不实现前缀注入（`query_instruction_for` 只覆盖 bge 的查询指令）。若把
+`HIPPOCAMPUS_EMBEDDING_MODEL` 配成 `onnx:Xenova/e5-*`，表征会**静默变差**（无报错）。
+处置：**已知限制，不承诺支持 e5**；要支持需在嵌入函数按 repo 加前缀（工作项，未排期）。
