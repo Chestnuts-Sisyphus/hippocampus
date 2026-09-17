@@ -59,7 +59,7 @@ SEED_ITEMS: list[SeedItem] = [
     # --- 过期项：构造时间使之降级/归档（A26／A31 演示） ---
     SeedItem("我在准备 2026 年春季的实习申请", "status", "expired", "春季实习申请", age_days=400),
     SeedItem("我最近在刷算法题，每天两道", "status", "expired", "每天两道题", age_days=500, lifecycle="dormant"),
-    # --- 模型轨样本：来自模型输出，shadow=1，**永不注入** ---
+    # --- 观察轨样本：来自模型输出，shadow=1，**永不注入** ---
     SeedItem("用户可能更偏好远程优先的团队", "fact", "model_track", "（模型归纳，未经用户确认）", age_days=5),
     SeedItem("用户似乎对通勤时间敏感", "fact", "model_track", "（模型归纳，未经用户确认）", age_days=5),
 ]

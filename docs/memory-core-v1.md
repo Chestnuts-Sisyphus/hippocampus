@@ -42,7 +42,8 @@ class MemoryCore:
 
     def consolidate(scope, *, user_text="", assistant_text="") -> TurnResult
         # 一轮对话结束后的固化（抽取→消歧→去重→冲突→挂起）
-        # user_text → A 轨；assistant_text → B 轨（shadow=1，永不注入）
+        # 确认轨（preference／fact，冲突挂起）与非确认轨（status／resource，自动入库）都从 user_text 抽；
+        # assistant_text 只作触发信号——**模型输出不进正式记忆**（观察轨写入走显式 write(source="model")，shadow=1）
 
     # —— 记忆 CRUD（A9，supersede 语义）——
     def list_memories(scope, *, limit=20, kind=None, status="active",

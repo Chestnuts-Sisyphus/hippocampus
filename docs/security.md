@@ -53,12 +53,53 @@ file:///etc/passwd           ftp://…   gopher://…
 pytest tests/test_a40_a41_safety.py -k url -v
 ```
 
-## ③ 其他隐私立场（写进设计，不是补丁）
+## ③ 代理鉴权：实例令牌（A2）
+
+**规则**：代理形态的三个推理端点（`/v1/chat/completions`、`/v1/responses`、`/v1/messages`）
+要求 `Authorization: Bearer <实例令牌>`；未带或不对一律回 **401**。
+
+| 项 | 说明 |
+|---|---|
+| 令牌从哪来 | 首次 `hippocampus proxy` 启动时生成（`secrets.token_hex(24)`，48 位十六进制），落盘 `<数据根>/instance_token`；进程重启复用同一份 |
+| 怎么拿到 | `hippocampus doctor` 只打印**前 8 位**（够确认"是不是这份"，不够冒用）；完整令牌读文件 |
+| 不是外部凭据 | 实例令牌只保护本机代理入口；上游模型凭据仍只从环境变量／密钥服务读（见 ①），两者不混 |
+| 使用边界 | 这是**单机自用**的入口门禁，不是多用户鉴权：不区分角色、无过期时间、无吊销列表；换令牌＝删文件重启 |
+| 不校验令牌的端点 | `/health`、`/v1/models`：只回本机元信息与配置的模型名，不含任何记忆内容。代理默认只监听 `127.0.0.1`，**不要绑到对外地址** |
+
+**怎么验**：
+
+```bash
+pytest tests/test_n7_auth_passthrough.py -q     # 生成/复用、未带 401、带对放行、非 2xx 透传
+```
+
+## ④ 审计与观察文件（位置、内容、边界）
+
+| 文件 | 位置 | 内容 |
+|---|---|---|
+| `audit.jsonl` | `<数据根>/accounts/<account>/audit.jsonl` | 每次注入检索的**候选全集**（top-N=50，超限只记计数）：doc_id／kind／channel／score／是否注入／被剔理由（A18） |
+| `observe.jsonl` | 同目录 | 注入事件（query ＋实际注入的 id）与确认事件（confirm 的胜出／veto 的落选 id） |
+| `trace`（JSON） | 同目录 | 一轮的注入／决策轨迹；`hippocampus explain` 把三份合并成一份 run 视图 |
+
+- 两份 JSONL 都是**旁路追加写**：写失败只记 stderr，绝不阻断注入／固化主流程。
+- 它们**含记忆原文与查询原文**（不是脱敏日志）：属本机私有数据，随账户目录一起管理；
+  不进仓库、不进示例库（`scripts/scan_personal_data.py` 会扫示例库）。
+- 文件权限：Windows 下继承账户目录 ACL（本项目的使用边界＝单机单用户自用，与实例令牌同一口径）。
+
+**怎么验**：
+
+```bash
+pytest tests/test_n4_audit_sink.py tests/test_n16_disk_rotation.py -q
+hippocampus explain --run <轨迹名>          # 候选全集 + 被剔理由
+```
+
+## ⑤ 其他隐私立场（写进设计，不是补丁）
 
 - **记忆只增不删**：修改走 `supersede`（旧条保留、可追溯），删除走归档（`archived`）。
   这是"记忆可审计"的底座——能被悄悄改掉的记忆没法审计。
-- **双轨隔离**：模型输出进观察轨（`shadow=1`，**永不注入**）；只有用户原话或显式"记住"
-  才进正式记忆。晋升只能由人确认触发（无自动晋升）。
+- **观察轨隔离**：模型输出进观察轨（`shadow=1`，**永不静默注入**）；只有用户原话或显式"记住"
+  才进正式记忆。晋升只能由人确认触发（无自动晋升）。命名口径：**"双轨"专指确认轨（`fire_track_a`：
+  用户消息的 preference／fact，输出完成前形成确认块）／非确认轨（`after_response`：status／resource
+  响应后自动入库）**；模型侧一律叫**观察轨**（`shadow=1`），两者不是一个维度。
 - **scope 标识是外部输入**：`account`／`session` 来自 HTTP 头或 CLI 参数，一律做
   目录穿越校验（只允许 `[A-Za-z0-9._-]`，≤64 字符，不含 `..`），非法在入口就拒（HTTP 400）。
 - **写文件工具限定工作目录**：越界路径直接判"参数错"，不落盘。

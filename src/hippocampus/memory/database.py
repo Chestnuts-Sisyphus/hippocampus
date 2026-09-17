@@ -8,6 +8,7 @@ SQLite 主库：实体 / 记忆 / 经历 / 关系 四张表（对应设计文档
 """
 
 import json
+import re
 import sqlite3
 import time
 import uuid
@@ -53,7 +54,7 @@ CREATE TABLE IF NOT EXISTS memories (
     source_episode_id  TEXT DEFAULT '',
     change_context     TEXT DEFAULT '',
     security_flag      INTEGER DEFAULT 0, -- P04: 内容注入检测标记（0=正常 1=可疑 2=高危）
-    shadow             INTEGER DEFAULT 0, -- 轨道B: 1=观察期（不污染正式检索） 0=正式
+    shadow             INTEGER DEFAULT 0, -- 观察轨: 1=观察期（不污染正式检索） 0=正式
     created_at         INTEGER NOT NULL,
     updated_at         INTEGER NOT NULL
 );
@@ -145,12 +146,43 @@ def gen_id(prefix: str) -> str:
     return f"{prefix}_{uuid.uuid4().hex[:12]}"
 
 
+# SQL 标识符白名单（安全审计 N20-①）：PRAGMA/ALTER 这类**不能参数绑定**的位置，
+# 只能拼字符串——所以拼进去的每一段都必须先过这道校验（表名/列名/DDL 都只允许
+# `字母或下划线开头 + 字母数字下划线`，DDL 允许列定义里的空格与括号）。
+_IDENT_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_DDL_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(\s*\([^)]*\))?(\s+[A-Za-z_][A-Za-z0-9_]*(\s*\([^)]*\))?)*")
+
+
+def _safe_ident(name: str) -> str:
+    """标识符白名单校验（不合法直接抛，绝不把外部串拼进 SQL）。"""
+    text = str(name or "")
+    if not _IDENT_RE.fullmatch(text):
+        raise ValueError(f"非法 SQL 标识符: {text!r}")
+    return text
+
+
+def _safe_ddl(ddl: str) -> str:
+    """列定义片段校验（`col TYPE [DEFAULT x]` 这种；只允许白名单字符与括号）。"""
+    text = " ".join(str(ddl or "").split())
+    if not text or not re.fullmatch(r"[A-Za-z0-9_ ,()'\".-]+", text):
+        raise ValueError(f"非法 DDL 片段: {ddl!r}")
+    if "--" in text or ";" in text:
+        raise ValueError(f"非法 DDL 片段（含注释/分号）: {ddl!r}")
+    return text
+
+
 def _ensure_column(conn: sqlite3.Connection, table: str, col: str, ddl: str) -> bool:
-    """幂等 ALTER：列已存在则跳过，返回是否本次新增。"""
+    """幂等 ALTER：列已存在则跳过，返回是否本次新增。
+
+    安全（N20-①）：`table` / `col` / `ddl` 都过白名单校验后再拼——这些值在本项目里是
+    写死的常量，但 PRAGMA/ALTER 不能参数绑定，所以把"只能拼"的地方收成"拼之前先校验"。
+    """
+    table = _safe_ident(table)
+    col = _safe_ident(col)
     cols = [r[1] for r in conn.execute(f"PRAGMA table_info({table})").fetchall()]
     if col in cols:
         return False
-    conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+    conn.execute(f"ALTER TABLE {table} ADD COLUMN {_safe_ddl(ddl)}")
     return True
 
 
@@ -231,6 +263,30 @@ def ensure_event_time_param(conn: sqlite3.Connection) -> None:
             (json.dumps(params, ensure_ascii=False), row["id"]),
         )
         conn.commit()
+
+
+def set_active_params(conn: sqlite3.Connection, updates: dict[str, Any], *, reason: str = "") -> dict[str, Any]:
+    """**人工标定入口**：把若干参数合并进活跃快照（只覆盖给定键，不动其余）。
+
+    为什么要有（正本 §四：参数存 param_snapshots，**可人工标定**）：标定脚本、公开基准的
+    消融对照（换注入条数／预算／开关）都要"改一个参数再跑一遍"。此前只有"补默认值"的
+    ensure_* 系列，没有"显式改值"的入口，改值只能手写 SQL（不受支持的路径）。
+    返回合并后的参数字典；没有活跃快照时返回空字典（调用方自己决定怎么兜）。
+    """
+    row = conn.execute("SELECT id, params FROM param_snapshots WHERE is_active=1 LIMIT 1").fetchone()
+    if not row:
+        return {}
+    try:
+        params = json.loads(row["params"])
+    except (json.JSONDecodeError, TypeError):
+        params = {}
+    params.update(updates or {})
+    conn.execute(
+        "UPDATE param_snapshots SET params=?, change_desc=? WHERE id=?",
+        (json.dumps(params, ensure_ascii=False), f"人工标定：{reason}" if reason else "人工标定", row["id"]),
+    )
+    conn.commit()
+    return params
 
 
 RETRIEVAL_PARAM_DEFAULTS = {
@@ -539,14 +595,14 @@ def touch_memory(conn: sqlite3.Connection, memory_id: str, at: int | None = None
 
 
 def set_memory_shadow(conn: sqlite3.Connection, memory_id: str, shadow: int) -> None:
-    """轨道B：设置记忆 shadow 标记（0=正式 1=观察期）。"""
+    """观察轨：设置记忆 shadow 标记（0=正式 1=观察期）。"""
     conn.execute("UPDATE memories SET shadow=?, updated_at=? WHERE id=?", (1 if shadow else 0, now_ms(), memory_id))
 
 
 def promote_shadow(
     conn: sqlite3.Connection, memory_id: str | None = None, where: str = "shadow=1", limit: int = 100
 ) -> int:
-    """轨道B：把 shadow=1 的记忆批量/单条转为正式（shadow=0）。
+    """观察轨：把 shadow=1 的记忆批量/单条转为正式（shadow=0）。
     memory_id 给定则只转该条；否则转 where 条件的全部（上限 limit）。
     返回转正条数。抽查误提取率低后调用。"""
     if memory_id is not None:

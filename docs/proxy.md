@@ -43,37 +43,46 @@
   `content[].text`／responses 的 `output[].content[].text`。
 - **确认块由记忆层生成、由代理追加**（不由模型生成，A39）；关开关（配置或
   `X-Hippocampus-Confirm: 0` 头）就不追加；`确认 n`／`否决 n` 在入口消费，不转发上游。
-- 流式（`stream: true`）按各家协议回：chat 的 `data:` chunk ＋ `[DONE]`；
-  anthropic 的 `message_start`→`content_block_delta`→`message_stop`；
-  responses 的 `response.created`→`…`→`response.completed`（八事件序列）。
+- 流式（`stream: true`）是**真流式**：上游 SSE **逐行转发**给客户端，每来一行就转发一行
+  （chat／anthropic／responses 三种上游格式各自按本家协议转），没有"攒完再一次性吐出"。
+  流末做本轮固化，确认块作为**末尾 delta** 追加；上游非 2xx 时按状态码＋错误体原样透传。
 
 ## 四、诚实的边界（写在文档里，不藏）
 
 | 限制 | 说明 |
 |---|---|
-| **流式是"单 delta"** | 我们**没有**把上游的逐行流式转发给客户端（前身有）。客户端拿到的是"一次性到达的完整回复"，协议正确但**没有逐字效果**。真·逐行转发见缺口清单。 |
-| **无鉴权** | 代理默认只监听 `127.0.0.1`，不校验令牌。前身有实例令牌（401）——这一项**尚未移植**，见缺口清单。 |
-| **chat→responses 不支持** | 与前身同样回 501。 |
-| 工具调用 | chat 入站→chat 上游透传；anthropic/responses 的工具字段按随迁转换器处理，**未做端到端联调**（没有可用的工具调用客户端做实测）。 |
+| chat→responses 不支持 | 与前身同样回 501。 |
+| 工具调用 | chat 入站→chat 上游透传；anthropic／responses 的工具字段按随迁转换器处理，三向都有端到端用例（`tests/test_n15_proxy_tools.py`）。 |
+| 代理 session 默认按天分桶 | `X-Hippocampus-Session`／`X-Session-Id` 可显式指定；缺省按 `day-YYYYMMDD` 分桶（可配 `proxy.session_bucketing`）。 |
+| `/v1/models` 回配置的模型名 | 列表回 `llm.model` 配的那个名字（未配则回内置默认名），不再回占位串。 |
+| 请求进入代理后记忆写入单库 | 代理与 Agent 两种形态共用同一记忆库；同一库目录是**单写者**（库级写锁），不要同时跑两个写进程。 |
 
 ## 五、怎么自己验
 
 ```bash
-# 起代理（离线档也能起，用来验协议形状）
+# 起代理（离线档也能起，用来验协议形状；首次启动生成实例令牌）
 hippocampus proxy --port 8765
+TOKEN=$(cat <数据根>/instance_token)     # 数据根见 `hippocampus doctor`
 
 # chat 入站
 curl -s localhost:8765/v1/chat/completions -H 'content-type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"model":"m","messages":[{"role":"user","content":"我投简历有什么要求？"}]}' | head -c 300
 
 # anthropic 入站
 curl -s localhost:8765/v1/messages -H 'content-type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"model":"m","max_tokens":256,"system":"你是助手","messages":[{"role":"user","content":"我投简历有什么要求？"}]}' | head -c 300
 
 # responses 入站
 curl -s localhost:8765/v1/responses -H 'content-type: application/json' \
+  -H "Authorization: Bearer $TOKEN" \
   -d '{"model":"m","instructions":"你是助手","input":"我投简历有什么要求？"}' | head -c 300
 
+# 未带令牌应当拿到 401（鉴权确实生效）
+curl -s -o /dev/null -w '%{http_code}\n' localhost:8765/v1/chat/completions \
+  -H 'content-type: application/json' -d '{"model":"m","messages":[]}'
+
 # 协议形状的自动化验证（真服务 + 真 HTTP 客户端）
-python -m pytest tests/test_proxy_formats.py -q
+python -m pytest tests/test_proxy_formats.py tests/test_n6_streaming.py tests/test_n7_auth_passthrough.py -q
 ```

@@ -13,11 +13,16 @@
 2. `answer` 后固化 → 本轮确定的结论写回记忆（由 agent 产生，不是人工写入）
 3. 冲突 → 挂起确认 → 确认后后续行为改变
 4. 生命周期 → 降级/归档的记忆不进注入集合
+
+**记忆层机制不得在 agent 里被阉割**（设计正本 §一"不阉割不重构"）：agent 与代理形态走
+**同一套记忆层入口**——`think` 轮首消费确认指令（`core.confirm`），`answer` 轮末走
+`core.consolidate`（对话固化＋漏抽/消歧守卫＋确认块生成）。覆盖表见 `docs/forms-parity.md`。
 """
 
 from __future__ import annotations
 
 import re
+import sys
 from typing import Annotated, Any, TypedDict
 
 from langgraph.graph import END, StateGraph
@@ -41,6 +46,7 @@ class AgentState(TypedDict, total=False):
     exit: str
     exit_reason: str
     pending: int
+    confirmation: str
 
 
 def _memory_lines(
@@ -80,6 +86,37 @@ def build_graph(core: MemoryCore, scope: Scope, *, tools: ToolBox, policy: Any, 
     def think(state: AgentState) -> dict[str, Any]:
         step = int(state.get("step", 0)) + 1
         task = state.get("task", "")
+        # [轮首] 确认指令消费：`确认 n`／`否决 n` 是记忆层确认轨的入口（与代理形态同一入口）。
+        # agent 不得"看不见"用户对挂起冲突的裁决——否则确认轨在 Agent 形态里等于断链。
+        if step == 1:
+            try:
+                confirmation = core.confirm(scope, task)
+            except Exception as e:  # 记忆层软失败不阻断本轮任务
+                sys.stderr.write(f"[agent] 确认指令消费失败（软失败）: {e}\n")
+                confirmation = None
+            if confirmation is not None:
+                text = f"已处理你的裁决：{confirmation.text}"
+                decision = Decision(action="answer", args={"text": text}, why="轮首消费确认指令（确认轨入口）")
+                recorder.append(
+                    {
+                        "node": "think",
+                        "step": step,
+                        "action": decision.action,
+                        "args": decision.args,
+                        "why": decision.why,
+                        "injected_ids": [],
+                        "memory_lines": [],
+                        "dropped": [],
+                        "policy": "confirmation",
+                    }
+                )
+                return {
+                    "step": step,
+                    "decisions": [decision.to_dict()],
+                    "memory_lines": [],
+                    "injected_ids": [],
+                    "confirmation": confirmation.text,
+                }
         lines, injected, dropped, scored = _memory_lines(core, scope, task)
         decision: Decision = policy.decide(
             task,
@@ -138,7 +175,12 @@ def build_graph(core: MemoryCore, scope: Scope, *, tools: ToolBox, policy: Any, 
             tool_result = state.get("last_tool") or {}
             if tool_result.get("ok"):
                 text = f"已完成：{decision.get('action')}"
-                if decision.get("action") == "list_memories":
+                if decision.get("action") == "search_memory":
+                    # 检索本身不是"任务完成"——如实报命中情况（空命中按"没依据"走三出口）
+                    n = len(lines)
+                    text = f"检索完成：命中 {n} 条相关记忆。" if n else "检索完成：没有命中相关记忆。"
+                    insufficient = n == 0
+                elif decision.get("action") == "list_memories":
                     items = (tool_result.get("result") or {}).get("items") or []
                     text = "当前生效的记忆：\n" + "\n".join(f"- [{i['kind']}] {i['content']}" for i in items)
                 elif decision.get("action") == "write_file":
@@ -164,8 +206,8 @@ def build_graph(core: MemoryCore, scope: Scope, *, tools: ToolBox, policy: Any, 
                 exit_kind, reason = "completed", "有依据并给出结论"
 
         # 记忆固化（A30-②）：把本轮的结论写回；写不写由出口决定（做不了就不写）。
-        # 来源轨纪律：agent 自己推导出的结论属**模型轨**（shadow=1，永不注入），
-        # 只有用户原话／显式"记下"才进正式记忆（双轨隔离，验收 A8）。
+        # 来源轨纪律：agent 自己推导出的结论属**观察轨**（source="model" → shadow=1，永不注入），
+        # 只有用户原话／显式"记下"才进正式记忆（观察轨隔离，验收 A8）。
         consolidated = 0
         if exit_kind == "completed" and lines and state.get("task"):
             outcome = core.write(
@@ -194,7 +236,38 @@ def build_graph(core: MemoryCore, scope: Scope, *, tools: ToolBox, policy: Any, 
                 "consolidated": consolidated,
             }
         )
-        return {"answer": text, "exit": exit_kind, "exit_reason": reason, "pending": len(core.pending(scope))}
+        # [轮末] 对话固化＋守卫＋确认块：与代理形态**同一条路径**（`core.consolidate`）。
+        # 放在这里而不是 answer 之前：先把本轮结论固化掉，再走"对话里的其他内容"。
+        turn_pending = len(core.pending(scope))
+        turn_block = ""
+        try:
+            turn = core.consolidate(
+                scope,
+                user_text=state.get("task") or "",
+                # 模型输出只作触发信号；**不进正式记忆**（观察轨纪律）——上面的 write 才是
+                # 本 agent 自己结论的落点，且带 source="model"（shadow=1）。
+                assistant_text=text if exit_kind == "completed" else "",
+            )
+            turn_block = turn.confirm_block or ""
+            turn_pending = turn.pending
+            recorder.append(
+                {
+                    "node": "consolidate",
+                    "step": state.get("step", 0),
+                    "created": turn.write.created,
+                    "consolidated_ids": list(turn.write.ids),
+                    "episode_id": turn.write.episode_id,
+                    "confirm_block": bool(turn_block),
+                    "pending": turn.pending,
+                }
+            )
+        except Exception as e:  # 固化软失败不阻断收口（记忆层自身的软失败口径）
+            sys.stderr.write(f"[agent] 轮末固化失败（软失败，不影响本轮收口）: {e}\n")
+            recorder.append({"node": "consolidate", "step": state.get("step", 0), "error": type(e).__name__})
+        if turn_block:
+            # 确认块由记忆层生成、由调用方追加（不在 offer 里由模型生成，A39 同一口径）
+            text = (text + "\n\n---\n" + turn_block).strip()
+        return {"answer": text, "exit": exit_kind, "exit_reason": reason, "pending": turn_pending}
 
     def route_after_think(state: AgentState) -> str:
         decision = (state.get("decisions") or [{}])[-1]
@@ -208,8 +281,12 @@ def build_graph(core: MemoryCore, scope: Scope, *, tools: ToolBox, policy: Any, 
         if int(state.get("step", 0)) >= int(state.get("max_steps", 8)):
             return "answer"
         decision = (state.get("decisions") or [{}])[-1]
-        if decision.get("action") == "search_memory" and (state.get("memory_lines") or []):
-            return "think"  # 拿到记忆后重新决策（用记忆里的依据作答）
+        if decision.get("action") == "search_memory":
+            # 检索之后**一律回 think**（第 2 步是"按意图执行动作"：记住/列清单/写文件）。
+            # 此前这里要求"必须检索到东西"才回 think——于是空库上跑「记住：我不看外包」会
+            # 直接收口、什么也没做（还被报成 completed），实为漏执行用户意图。
+            # 循环有界：think 每轮 step+1，策略在 step=2 执行动作、之后收口，且另有 max_steps 兜底。
+            return "think"
         return "answer"
 
     graph = StateGraph(AgentState)
