@@ -12,8 +12,6 @@
 
 from __future__ import annotations
 
-import json
-import sys
 import time
 from pathlib import Path
 from typing import Any
@@ -30,13 +28,10 @@ def audit_path(account_id: str) -> Path:
 
 
 def _append(account_id: str, event: dict[str, Any]) -> None:
-    try:
-        path = audit_path(account_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event, ensure_ascii=False) + "\n")
-    except Exception as e:
-        sys.stderr.write(f"[audit] 审计记录失败（不中断）: {e}\n")
+    """追加一条审计事件（D1：按 `observability` 配置做**大小轮转**；软失败不中断主流程）。"""
+    from hippocampus.memory import jsonl_log
+
+    jsonl_log.append_jsonl(audit_path(account_id), event)
 
 
 def record_retrieval(
@@ -66,26 +61,21 @@ def record_retrieval(
     )
 
 
-def load_events(path: str | Path | None, account_id: str | None = None) -> list[dict[str, Any]]:
-    """读审计 JSONL（无文件 → 空列表；坏行跳过）。"""
+def load_events(
+    path: str | Path | None, account_id: str | None = None, *, include_rotated: bool = False
+) -> list[dict[str, Any]]:
+    """读审计 JSONL（无文件 → 空列表；坏行跳过）。
+
+    `include_rotated=True` 时连同滚动份（`audit.jsonl.1/.2…`）按"旧→新"一起读——
+    复盘"上周那次注入为什么没进"时用得着（D1 轮转后历史不会凭空消失）。
+    """
+    from hippocampus.memory import jsonl_log
+
     if path is None:
         path = audit_path(account_id) if account_id else None
-    if not path or not Path(path).exists():
+    if not path:
         return []
-    out: list[dict[str, Any]] = []
-    try:
-        with open(path, encoding="utf-8") as f:
-            for line in f:
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    out.append(json.loads(line))
-                except (ValueError, TypeError):
-                    continue
-    except OSError:
-        return []
-    return out
+    return jsonl_log.load_events(path, include_rotated=include_rotated)
 
 
 __all__ = ["TOP_N", "audit_path", "load_events", "record_retrieval"]

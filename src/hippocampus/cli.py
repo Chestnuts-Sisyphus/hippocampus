@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -94,6 +95,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         if health["last_error"]:
             parts.append(f"上次同步错误 {health['last_error'][:80]}")
         print("  索引健康      " + "  /  ".join(parts))
+        if not health["healthy"]:
+            print("  索引修复      可跑 `hippocampus index rebuild`（从 memory.db 重建向量池，只丢索引不丢记忆）")
 
     tier = core.embedding_tier()
     download = "需联网下载一次" if tier["needs_download"] else "零下载"
@@ -156,7 +159,7 @@ def cmd_seed(args: argparse.Namespace) -> int:
     result = seed(core, scope, verbose=True)
     print()
     print(f"完成：新增 {result['count']} 条；库内 {result['stats']}")
-    print("示例数据是**合成的**，含已知真值（事实／冲突对／过期项／模型轨样本）。")
+    print("示例数据是**合成的**，含已知真值（事实／冲突对／过期项／观察轨样本）。")
     core.close()
     return 0
 
@@ -359,6 +362,76 @@ def cmd_learning(args: argparse.Namespace) -> int:
     return 0
 
 
+def _bench_home(name: str) -> str:
+    """基准评测默认数据根：**不碰用户真实记忆库**。D:/tmp 在就放那儿（C 盘紧张），否则用系统临时目录。"""
+    import tempfile
+
+    base = Path("D:/tmp/hc-bench") if Path("D:/tmp").exists() else Path(tempfile.gettempdir()) / "hc-bench"
+    return str(base / name)
+
+
+def cmd_bench(args: argparse.Namespace) -> int:
+    """公开基准评测（LoCoMo／LongMemEval）：离线档检索/词面口径，非官方分。"""
+    from hippocampus.eval import public_bench
+
+    data = Path(args.data)
+    if not data.exists():
+        print(f"数据集不存在：{data}", file=sys.stderr)
+        print("  下载：见 docs/benchmark.md §一（钉版本的 curl 命令 + sha256 校验）", file=sys.stderr)
+        return 2
+    home = args.home or _bench_home(args.name)
+    # 基准默认钉离线档：不发出站请求（跑模型臂要显式 --online）。
+    # 教训：曾在"环境里有 key"时跑基准，维护链对模型端点发了 205 次请求（全 401）——
+    # 既不可复现，也可能烧用户的钱。默认关掉是纪律，不是可选项。
+    if not args.online:
+        os.environ["HIPPOCAMPUS_OFFLINE"] = "1"
+    print(f"数据根：{home}（基准库与用户记忆库隔离）")
+    print(f"档位：{'离线档（无出站请求）' if not args.online else '在线（会使用环境里的模型端点与凭据）'}")
+    report = public_bench.run(
+        bench=args.name,
+        data=data,
+        home=home,
+        limit=args.limit,
+        offset=args.offset,
+        json_out=args.json,
+        as_memories=not args.no_memories,
+        inject_max_items=args.inject_max_items,
+        shadow_log=args.shadow_log,
+        split_pools=not args.dup_pools,
+    )
+    print()
+    print(public_bench.render(report))
+    if args.json:
+        print(f"\n报告已写入 {args.json}")
+    return 0
+
+
+def cmd_index(args: argparse.Namespace) -> int:
+    """向量索引运维（B6）：status 只读体检 / rebuild 从 memory.db 重建 / purge-wal 显式清队列。"""
+    from hippocampus.memory import retrieval as rt
+
+    core = _core(args)
+    scope = _scope(args)
+    try:
+        if args.action == "status":
+            print(json.dumps(core.index_health(scope), ensure_ascii=False, indent=2))
+            return 0
+        if args.action == "rebuild":
+            result = core.rebuild_index(scope, pool=args.pool)
+            for key, ok in result.items():
+                print(f"  向量池 {key}: {'已从 memory.db 重建' if ok else '重建失败（见上方告警）'}")
+            health = core.index_health(scope)
+            print(f"  索引健康: {json.dumps(health, ensure_ascii=False)}")
+            return 0 if all(result.values()) else 1
+        # purge-wal：显式运维动作（手工清 chroma 内部队列，不受 chroma 支持；见 docs/roadmap.md）
+        session = core._session(scope)  # noqa: SLF001
+        n = rt.purge_embeddings_wal(session.chroma_dir)
+        print(f"  已清空 embeddings_queue {n} 行（手工清队列不受 chroma 支持，仅在磁盘告急时用）")
+        return 0
+    finally:
+        core.close()
+
+
 def cmd_export(args: argparse.Namespace) -> int:
     from hippocampus.core.transfer import export_package
 
@@ -476,6 +549,24 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("learning", help="学习开关")
     p.add_argument("action", choices=["off", "on"])
     p.set_defaults(func=cmd_learning)
+
+    p = sub.add_parser("index", help="向量索引运维：status／rebuild／purge-wal")
+    p.add_argument("action", choices=["status", "rebuild", "purge-wal"])
+    p.add_argument("--pool", choices=["mem", "ep", "all"], default="all", help="rebuild：重建哪个池")
+    p.set_defaults(func=cmd_index)
+
+    p = sub.add_parser("bench", help="公开基准评测：LoCoMo／LongMemEval（离线口径）")
+    p.add_argument("name", choices=["locomo", "longmemeval"])
+    p.add_argument("--data", required=True, help="数据集 JSON 路径（见 scripts/fetch_bench_data.py）")
+    p.add_argument("--limit", type=int, default=0, help="题量上限（0=全部）")
+    p.add_argument("--offset", type=int, default=0, help="从第几题开始（LongMemEval 采样用）")
+    p.add_argument("--json", help="把报告写到该路径（JSON）")
+    p.add_argument("--no-memories", action="store_true", help="消融：只进经历层（不建记忆条）")
+    p.add_argument("--inject-max-items", type=int, help="消融：覆盖注入条数上限（默认 8）")
+    p.add_argument("--shadow-log", action="store_true", help="保留逐题 shadow 调试行（默认关）")
+    p.add_argument("--online", action="store_true", help="允许走模型端点（默认离线档；会用到环境里的凭据）")
+    p.add_argument("--dup-pools", action="store_true", help="消融：每轮两处都落（旧口径，同句占两个注入位）")
+    p.set_defaults(func=cmd_bench)
 
     p = sub.add_parser("export", help="导出记忆库为目录包（manifest + memory.db）")
     p.add_argument("target", help="导出目标目录")

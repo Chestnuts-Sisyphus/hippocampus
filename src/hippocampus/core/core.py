@@ -182,6 +182,80 @@ class MemoryCore:
     # v1 冻结接口
     # ------------------------------------------------------------------
 
+    def ingest_history(
+        self,
+        scope: Scope,
+        turns: list[dict[str, Any]],
+        *,
+        as_memories: bool = True,
+        sync: bool = True,
+    ) -> dict[str, Any]:
+        """**把一段对话历史导入记忆库**（迁移/评测/回灌旧记录用的批量入口）。
+
+        逐轮落两处：
+        - `episodes`（经历层，短时→长时的原料，事件线索通道的数据源）；
+        - `memories`（`as_memories=True` 时，kind=`fact`，经验层三通道的数据源）。
+        实体只做**机械归属**：说话人（`speaker`）建成实体挂上；不做 LLM 抽取
+        （导入路径要的是"原样进库"，抽取属于对话固化链，走 `consolidate`）。
+
+        `turns` 每项：`{"text": str, "role": "user"/"assistant"/"tool", "ts_ms": int|None,
+        "session_id": str, "speaker": str}`（`session_id` 缺省用 scope.session）。
+        每项还可带 `as_memory`／`as_episode`（覆盖本轮的落两处开关）——**同一条内容不要
+        同时落两个池**：注入条数有上限，复制一份等于白占一个位子（实测影响见
+        `docs/benchmark.md` 的导入口径说明）。
+        `sync=True` 时导入完统一同步一次向量索引 + 重建 BM25（**批内不逐条同步**——
+        逐条同步会让导入退化成 O(n²)）。
+        返回 `{"episodes": n, "memories": n}`。
+        """
+        scope = _as_scope(scope)
+        session = self._session(scope)
+        from hippocampus.memory import database as db
+
+        ep_count = mem_count = 0
+        with self._lock(scope.account).held(), session.lock:
+            for turn in turns or []:
+                text = str((turn or {}).get("text") or "").strip()
+                if not text:
+                    continue
+                sid = str(turn.get("session_id") or f"session_{scope.session}")
+                role = str(turn.get("role") or "user")
+                ts = turn.get("ts_ms")
+                entity_ids: list[str] = []
+                speaker = str(turn.get("speaker") or "").strip()
+                if speaker:
+                    existing = db.find_entity_by_name(session.conn, speaker)
+                    entity_ids.append(
+                        existing["id"] if existing else db.add_entity(session.conn, speaker, "Person")
+                    )
+                want_ep = bool(turn.get("as_episode", True))
+                want_mem = bool(turn.get("as_memory", as_memories))
+                pid = ""
+                if want_ep:
+                    pid = db.add_episode(
+                        session.conn,
+                        sid,
+                        role,
+                        text,
+                        entity_ids=entity_ids,
+                        event_time=int(ts) if ts else None,
+                        security_flag=0,
+                    )
+                    ep_count += 1
+                if want_mem:
+                    db.add_memory(
+                        session.conn,
+                        "fact",
+                        text,
+                        entity_ids=entity_ids,
+                        source_quote=f"导入历史（{sid}）",
+                        source_episode_id=pid,
+                    )
+                    mem_count += 1
+            session.conn.commit()
+            if sync:
+                self._reindex(session)
+        return {"episodes": ep_count, "memories": mem_count}
+
     def write(
         self,
         scope: Scope,
@@ -416,6 +490,8 @@ class MemoryCore:
                 top_k=limit,
                 session_id=f"session_{scope.session}",
                 flow=flow,
+                # 读索引失败 → 从源真相重建向量池（B6）；见 rt.semantic_search 的三级处置
+                repair=lambda: session.repair_vector_pool("mem"),
             )
         items, dropped = [], []
         for row in raw.get("results", []):
@@ -527,6 +603,7 @@ class MemoryCore:
                 top_k=AUDIT_TOP_N,
                 session_id=f"session_{scope.session}",
                 flow=flow,
+                repair=lambda: session.repair_vector_pool("mem"),
             )
             injected_set = set(injection.injected_ids)
             candidates = []
@@ -564,8 +641,10 @@ class MemoryCore:
     ) -> TurnResult:
         """一轮对话结束后的固化（抽取 → 消歧 → 去重 → 冲突 → 挂起确认）。
 
-        两条轨：`user_text` 走 A 轨（preference／fact，可进正式记忆）；
-        `assistant_text` 走 B 轨（status／resource，`shadow=1`，**永不注入**）。
+        两条轨都从 `user_text` 抽：确认轨 `fire_track_a`（preference／fact，冲突挂起人工确认）；
+        非确认轨 `after_response`（status／resource，自动入库、不建确认块）。
+        `assistant_text` 只作触发信号——**模型输出不进正式记忆**；模型输出若要落库，
+        走显式 `write(source="model")` 进观察轨（`shadow=1`，永不注入）。
         """
         scope = _as_scope(scope)
         session = self._session(scope)
@@ -596,6 +675,14 @@ class MemoryCore:
                 block_text = mb.after_response(session, user_text or "（无用户轮）", [])
                 if block_text:
                     turn.confirm_block = (turn.confirm_block + block_text).strip()
+                # 观察轨（正本 §三-2）：**模型输出**里提到的资源/状态进观察轨（shadow=1，永不注入）。
+                # 这一步此前在生产路径上没有调用点（只有随迁测试在调），等于"模型输出轨"没接上；
+                # 两种形态都走 consolidate，所以补在这里——两形态同一条路（"不阉割"条款）。
+                # 有端点时才会真的调模型（学习开关关掉则不抽）；离线档软失败返回空，不花钱。
+                try:
+                    turn.observed_ids = list(mb.extract_response(session, assistant_text) or [])
+                except Exception as e:
+                    sys.stderr.write(f"[core] 观察轨提取失败（软失败，不阻断固化）: {e}\n")
             # 轮末守卫（前身口径，B1/B2/B3）：漏抽补实体 + 实体消歧。
             # 放在最后一次 reindex 之前，让索引收尾带上守卫的改动。
             self._run_turn_guards(scope, session, user_text)
@@ -623,6 +710,7 @@ class MemoryCore:
                 top_k=8,
                 session_id=f"session_{scope.session}",
                 flow="user",
+                repair=lambda: session.repair_vector_pool("mem"),
             )
             channels = raw.get("channels") or {}
             from hippocampus.memory import disambiguate, missed_extract, retrieval_guard
@@ -1090,6 +1178,17 @@ class MemoryCore:
             tier, needs_download = "chromadb 内置档", True
         return {"model": model, "tier": tier, "needs_download": needs_download, "enabled": cfg["enabled"]}
 
+    def active_params(self, scope: Scope) -> dict[str, Any]:
+        """读该账户**当前活跃参数快照**（只读；代理/Agent 形态据此对齐行为）。
+
+        为什么形态层需要它：`cache_control_passthrough`、`injection_max_items` 这类参数存在
+        账户的活跃快照里（正本 §四：参数可人工标定），形态层只能通过这里读到，才能把
+        "配置里改了值"真的生效。写入口在记忆层内部（`database.set_active_params`）。
+        """
+        scope = _as_scope(scope)
+        session = self._session(scope)
+        return dict(rt.get_active_params(session.conn) or {})
+
     def index_health(self, scope: Scope) -> dict[str, Any]:
         """索引健康（doctor 用，B5）：chroma 可写性＋集合条数 vs 库内 active 条数＋同步错误。
 
@@ -1130,3 +1229,20 @@ class MemoryCore:
             "last_error": last_error,
             "healthy": healthy,
         }
+
+    def rebuild_index(self, scope: Scope, *, pool: str = "all") -> dict[str, Any]:
+        """从源真相（memory.db）重建向量索引池（B6 运维入口）。
+
+        `pool`：`"mem"`（memories 池）／`"ep"`（episodes 池）／`"all"`。
+        返回 `{"mem": bool, "ep": bool}`（True＝重建成功）。
+        用途：`hippocampus index rebuild`；检索引擎在读索引失败时也会自动走同一条重建
+        （见 `retrieval.semantic_search` 的三级处置）。重建只丢索引、不丢记忆。
+        """
+        scope = _as_scope(scope)
+        session = self._session(scope)
+        keys = ("mem", "ep") if pool == "all" else (pool,)
+        out: dict[str, Any] = {}
+        with self._lock(scope.account).held(), session.lock:
+            for key in keys:
+                out[key] = session.rebuild_vector_index(key)
+        return out

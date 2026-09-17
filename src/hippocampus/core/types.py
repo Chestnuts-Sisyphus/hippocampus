@@ -120,11 +120,16 @@ class ConfirmResult:
 
 @dataclass
 class TurnResult:
-    """一轮对话的写入结果（用户轮 + 助手轮）。"""
+    """一轮对话的写入结果（用户轮 + 助手轮）。
+
+    `observed_ids`：本轮**观察轨**入库的 id（模型输出里提取到的资源/状态，`shadow=1`，永不注入）。
+    这是"模型输出轨"在生产路径上真的被接上的证据（此前只有随迁测试在调 `extract_response`）。
+    """
 
     write: WriteResult = field(default_factory=WriteResult)
     confirm_block: str = ""
     pending: int = 0
+    observed_ids: list[str] = field(default_factory=list)
 
 
 __all__ = [

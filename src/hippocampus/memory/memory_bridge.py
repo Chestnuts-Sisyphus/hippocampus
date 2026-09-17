@@ -151,6 +151,7 @@ class MemorySession:
                 "（pip install 'hippocampus-agent[vector]' 可启用向量检索）\n"
             )
             self._client = None
+            self._embed_fn = None
             self.collections: dict[str, Any] = {"mem": None, "ep": None}
             self.collection = None
             self.idx = rt.build_bm25(self.conn)
@@ -175,6 +176,7 @@ class MemorySession:
 
         _emb = rt._resolve_embedding_function(get_embedding_config()["model"])
         _meta: dict[str, str] = {"hnsw:space": "cosine"}
+        self._embed_fn = _emb  # 重建向量池时复用同一个 EF（否则重建后的空间对不上）
         if _emb is not None:
             self.collections: dict[str, Any] = {
                 "mem": self._client.get_or_create_collection(
@@ -198,7 +200,7 @@ class MemorySession:
         # HC-0816-01 节点2：巩固/图式化维护触发节流（每天最多一次，注入路径低频触发）
         self._last_maintenance_scan_ms = 0
         self._MAINTENANCE_SCAN_INTERVAL_MS = 24 * 3600 * 1000
-        # 轨道A并发：user_text -> episode_id（两处 process_user_message 共享同一 episode，防重复；上限20）
+        # 确认轨：user_text -> episode_id（两处 process_user_message 共享同一 episode，防重复；上限20）
         self._episode_by_text: dict[str, str] = {}
         self._EP_CACHE_MAX = 20
 
@@ -216,6 +218,16 @@ class MemorySession:
             self._drain_index_if_needed()
         except Exception as e:
             sys.stderr.write(f"[memory] 索引队列消费失败（不中断）: {e}\n")
+
+        # B6：打开会话就预热一次向量段 reader（读不到就当场从 memory.db 重建）
+        try:
+            if not self.warmup_vector_index():
+                sys.stderr.write(
+                    "[index] 向量索引预热未通过（记忆仍在 memory.db 里）："
+                    "`hippocampus doctor` 看索引健康，`hippocampus index rebuild` 可手动重建\n"
+                )
+        except Exception as e:
+            sys.stderr.write(f"[memory] 向量索引预热异常（不中断）: {e}\n")
 
     # ---------- 待确认块队列（发现 28 修复：单槽 → 多槽） ----------
 
@@ -256,15 +268,93 @@ class MemorySession:
         self.idx = rt.build_bm25(self.conn)
         rt.sync_index(self.conn, self.collections)
 
+    # ---------- 向量索引：预热、修复、WAL 治理（B6 根因处理） ----------
+
+    def rebuild_vector_index(self, key: str = "mem") -> bool:
+        """从源真相（memory.db）重建一个向量池；成功 True。
+
+        用途：① 会话打开时的预热探测失败 → 立刻重建（把"运行中读不到"前置到打开时）；
+        ② 检索路径读索引失败 → 交给 `rt.semantic_search` 的 repair 回调（见其三级处置）。
+        源真相是 memory.db，重建只丢索引不丢记忆。软失败：异常记 stderr 并返回 False。
+        """
+        if self._client is None:
+            return False
+        try:
+            n = rt.rebuild_vector_pool(self.conn, self._client, key)
+            self.collections[key] = self._client.get_or_create_collection(
+                rt.COLLECTION_MEM if key == "mem" else rt.COLLECTION_EP,
+                metadata={"hnsw:space": "cosine"},
+                **({"embedding_function": self._embed_fn} if getattr(self, "_embed_fn", None) is not None else {}),
+            )
+            if key == "mem":
+                self.collection = self.collections["mem"]
+            self.idx = rt.build_bm25(self.conn)
+            sys.stderr.write(f"[index] 向量池 '{key}' 已从 memory.db 重建（重灌 {n} 条）\n")
+            return True
+        except Exception as e:
+            self._index_error = f"向量池重建失败({key}): {e}"
+            sys.stderr.write(f"[index] 向量池 '{key}' 重建失败: {e}\n")
+            return False
+
+    def repair_vector_pool(self, key: str = "mem"):
+        """读索引失败后的自愈入口：重建该池并返回**新的集合句柄**（修不好返回 None）。
+
+        为什么返回句柄：重建会删掉旧集合，检索路径手里那个旧句柄随之失效
+        （实测报 `Collection [...] does not exist`），所以重建后必须换新句柄再查。
+        """
+        if not self.rebuild_vector_index(key):
+            return None
+        return self.collections.get(key)
+
+    def warmup_vector_index(self) -> bool:
+        """会话打开时的**预热探测**：把向量段的 reader 提前建起来。
+
+        背景（B6）：hnsw 段偶发读不到（"Nothing found on disk"）只在**查询**时才暴露；
+        若等到对话中途才炸，用户侧表现是"明明有记忆却检索不到"。预热把这件事提前到打开时：
+        探测失败就**当场重建**（一次），修不好才在注入结果里明确告警。
+        软失败：任何异常都不阻断会话创建；无向量库时直接返回 True。
+        """
+        if self._client is None or self.collections.get("mem") is None:
+            return True
+        ok = True
+        try:
+            probe = rt._query_embedding("预热")  # noqa: SLF001 - 与检索同一条嵌入路径
+        except Exception:
+            return True  # 嵌入不可用：检索侧另有降级路径，这里不报
+        for key in ("mem", "ep"):
+            col = self.collections.get(key)
+            if col is None or not hasattr(col, "query"):
+                continue  # 无池，或池是替身（测试里传 object()）→ 跳过，不误判为"索引坏了"
+            try:
+                rt.semantic_search(col, "预热", n=1, query_embedding=probe)
+            except Exception as e:
+                sys.stderr.write(f"[index] 向量池 '{key}' 预热探测失败: {e}\n")
+                if not self.rebuild_vector_index(key):
+                    ok = False
+        rt.clear_index_error()  # 预热里探到的失败已经处理过，不留给后续检索
+        return ok
+
     def _drain_index_if_needed(self) -> None:
-        """若 embeddings_queue 积压：以 memory.db 为源真相全量 upsert，并尽量清空 WAL。"""
+        """索引 WAL（embeddings_queue）治理。
+
+        **不再手工删 chroma 的队列行**（B6 根因处理）：`DELETE FROM embeddings_queue` 是改
+        chroma 内部表（不受支持），实测会把"还没被 compactor 落进 HNSW 段的写入"抹掉，
+        表现为 `Error creating hnsw segment reader: Nothing found on disk` 的间歇读失败
+        （本项目注释里也记过一次同类事故：写后清 WAL → demo 10/10 掉到 7/10）。
+
+        现在的做法：
+        - **只写配置**：把 `automatically_purge` 打开，让 chroma 自己按受支持的方式在
+          compaction 之后回收队列行；
+        - 跨进程写入的积压照旧处理：队列非空时以 memory.db 为源真相做一次**全量幂等 upsert**
+          （只增不删，丢不了数据）。
+        """
+        try:
+            rt.enable_queue_autopurge(self.chroma_dir)
+        except Exception as e:
+            sys.stderr.write(f"[memory] 索引 WAL 自动回收配置写入失败（不中断）: {e}\n")
         if rt.embeddings_queue_depth(self.chroma_dir) <= 0:
             return
         rt.sync_index(self.conn, self.collections)
-        try:
-            rt.purge_embeddings_wal(self.chroma_dir)
-        except sqlite3.OperationalError as e:
-            sys.stderr.write(f"[memory] 索引 WAL 清空推迟（chroma 占用）: {e}\n")
 
     def maybe_run_maintenance(self, now: int | None = None) -> dict[str, Any]:
         """低频维护调度：离线巩固 + 图式化（HC-0816-01 节点2 挂钩）。
@@ -758,6 +848,8 @@ def prepare_injection(
                 top_k=8,
                 session_id=f"session_{session.account_id}",
                 flow=flow,
+                # 读索引失败 → 从源真相重建向量池（B6，见 rt.semantic_search 的三级处置）
+                repair=lambda: session.repair_vector_pool("mem"),
             )
             # 过滤 superseded（同 cli_chat._filter_active 逻辑）+ P04 安全剔除
             # （security_flag>0 的记忆与经历不进 format_injection；剔除查询异常
@@ -782,7 +874,7 @@ def prepare_injection(
                             if row and row["status"] != "active":
                                 continue  # 原 superseded 过滤
                             if row and (row["shadow"] or 0) == 1:
-                                continue  # 轨道B shadow 观察期记忆不进正式检索
+                                continue  # 观察轨 shadow 观察期记忆不进正式检索
                         elif r["kind"] == "episode":
                             row = session.conn.execute(
                                 "SELECT security_flag FROM episodes WHERE id=?", (r["doc_id"],)
@@ -881,9 +973,9 @@ def prepare_injection(
 def after_response(session: MemorySession, user_text: str, filtered: list[dict[str, Any]]) -> str:
     """响应后提炼入库 + 反馈环。返回确认块/警报拼装文本（含 \\n\\n---\\n 前缀），空则 ""。
 
-    轨道A前移后职责：只处理 status/resource（memory_types 过滤），preference/fact 由
+    职责分工后：after_response 只处理 status/resource（memory_types 过滤），preference/fact 由
     fire_track_a 并发处理。status/resource 不建确认块（任务书验收要求「状态不确认走 after_response」）。
-    保留 N2 纠正蒸馏 + N3 alarm。episode 与轨道A共享（_episode_by_text 缓存，防重复入库）。
+    保留 N2 纠正蒸馏 + N3 alarm。episode 与确认轨共享（_episode_by_text 缓存，防重复入库）。
     """
     if not user_text:
         return ""
@@ -930,7 +1022,7 @@ def after_response(session: MemorySession, user_text: str, filtered: list[dict[s
 
 
 def fire_track_a(session: MemorySession, user_text: str) -> str:
-    """轨道A：与 AI 思考并发提取 preference/fact → 冲突检测 → 建确认块存 pending_block。
+    """确认轨：与 AI 思考并发提取 preference/fact → 冲突检测 → 建确认块存 pending_block。
 
     返回确认块文本（含 \\n\\n---\\n 前缀），空则 ""。整个函数持 session.lock（与 after_response
     串行，但独立于 AI 转发并发执行）。episode 与 after_response 共享（_episode_by_text，防重复）。
@@ -939,7 +1031,7 @@ def fire_track_a(session: MemorySession, user_text: str) -> str:
         return ""
     try:
         with session.lock:
-            # B4-7（节点5）：学习开关 off → 不从对话自动入库（轨道A 路径闸）
+            # B4-7（节点5）：学习开关 off → 不从对话自动入库（确认轨路径闸）
             if not rt.get_active_params(session.conn).get("learning_enabled", True):
                 return ""
             session_tag = f"session_{session.account_id}"
@@ -987,11 +1079,11 @@ def fire_track_a(session: MemorySession, user_text: str) -> str:
                 return "\n\n---\n" + block.render()
             return ""
     except Exception as e:
-        sys.stderr.write(f"[memory] 轨道A 提炼失败（软失败，不追加确认块）: {e}\n")
+        sys.stderr.write(f"[memory] 确认轨提炼失败（软失败，不追加确认块）: {e}\n")
         return ""
 
 
-# 轨道A/响应后 类型分工（防重复提取）
+# 确认轨/响应后 类型分工（防重复提取）
 _PF_TYPES = ["preference", "fact"]
 _SR_TYPES = ["status", "resource"]
 
@@ -1009,7 +1101,7 @@ def _get_extract_response_fn() -> Callable[[str], dict[str, Any]]:
 
 
 def extract_response(session: MemorySession, ai_response_text: str) -> list[str]:
-    """轨道B：从 AI 回复全文提取 resource/status → 入库（shadow=1，观察期，不确认）。
+    """观察轨：从 AI 回复全文提取 resource/status → 入库（shadow=1，观察期，不确认）。
 
     流程：LLM 提取（独立 prompt，宁缺毋滥）→ 实体消歧 → 建 assistant episode →
     记忆入库 shadow=1 → 返回入库 id 列表。
@@ -1018,7 +1110,7 @@ def extract_response(session: MemorySession, ai_response_text: str) -> list[str]
     if not ai_response_text or not ai_response_text.strip():
         return []
     try:
-        # B4-7（节点5）：学习开关 off → 轨道B 不从 AI 回复自动入库（不调 LLM 提取）
+        # B4-7（节点5）：学习开关 off → 观察轨不从 AI 回复自动入库（不调 LLM 提取）
         if not rt.get_active_params(session.conn).get("learning_enabled", True):
             return []
         # P0：提取前硬拦截（C 密钥 / E PII）。本路径无 P04 mock 约束，命中即不调提取。
@@ -1073,9 +1165,9 @@ def extract_response(session: MemorySession, ai_response_text: str) -> list[str]
                 # P2（HC-0815-02 节点2）：AI 幻觉编造资源校验（声明的路径/文件名
                 # 本机全不存在 → 幻觉不入库；AI 无文件系统能力，编造 3/4 文件名实测）
                 if mem.get("type") == "resource" and not _resource_plausible(content):
-                    sys.stderr.write(f"[memory] 轨道B 幻觉资源不入库: {content[:60]}\n")
+                    sys.stderr.write(f"[memory] 观察轨幻觉资源不入库: {content[:60]}\n")
                     continue
-                # P1（HC-0815-02 节点1）：去重（与正式记忆重复的轨道B 不再入观察期）
+                # P1（HC-0815-02 节点1）：去重（与正式记忆重复的观察轨条目不再入观察期）
                 if dedup.find_duplicate(session.conn, session.collections, mem.get("type", "status"), content):
                     continue
                 _mem_flag = 0
@@ -1096,7 +1188,7 @@ def extract_response(session: MemorySession, ai_response_text: str) -> list[str]
                     entity_ids=mem_entities,
                     source_quote=mem.get("source_quote", ""),
                     source_episode_id=pid,
-                    scene_description="轨道B：AI回复提取（shadow观察期）",
+                    scene_description="观察轨：AI回复提取（shadow观察期）",
                     security_flag=_mem_flag,
                     shadow=1,
                 )
@@ -1106,7 +1198,7 @@ def extract_response(session: MemorySession, ai_response_text: str) -> list[str]
                 session.reindex()
             return ids
     except Exception as e:
-        sys.stderr.write(f"[memory] 轨道B 提取入库失败（软失败，返回空）: {e}\n")
+        sys.stderr.write(f"[memory] 观察轨提取入库失败（软失败，返回空）: {e}\n")
         return []
 
 

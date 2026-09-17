@@ -19,6 +19,7 @@ import functools
 import hashlib
 import json
 import math
+import re
 import sqlite3
 import sys
 from pathlib import Path
@@ -155,10 +156,59 @@ def _jieba_tokens(text: str) -> tuple:
     return tuple(w for w in jieba.lcut(text) if w.strip() and w not in STOPWORDS)
 
 
+# 拉丁词形归一的保守规则（只作用于**纯拉丁词**；中文词一律不动）。
+# 为什么要有：jieba 会把英文词原样切出来，但 "adopted"/"adopt"、"Caroline's"/"Caroline"
+# 在词面上对不上 → 英文语料的 BM25 召回显著偏弱（公开基准实测）。规则保守：短词不动、
+# 只剥常见屈折后缀，避免过度词干化（"series" → "serie" 这类坑）。
+_LATIN_RE = re.compile(r"^[A-Za-z][A-Za-z'-]*$")
+
+
+_STEM_PROTECTED = frozenset(
+    {
+        "series", "species", "news", "was", "has", "is", "this", "his", "its", "us", "as",
+        "status", "analysis", "basis", "crisis", "class", "less", "plus", "bus", "gas",
+    }
+)
+
+
+def _stem_latin(word: str) -> str:
+    """纯拉丁词的小写化 + 保守屈折还原；非拉丁词原样返回。
+
+    规则（刻意保守，宁可少还原也不要过度词干化）：
+    - 保护表与 `-ss/-us/-is/-as` 结尾不动（`series`/`status`/`analysis` 这类；
+      实测 `series` 被剥成 `sery` 属于过度词干化）；
+    - `ies`→`y`（stories→story）、`es` 仅在 `s/x/z/ch/sh` 后剥（boxes→box）、
+      其余单 `s` 复数剥掉（cats→cat）；
+    - `ing`/`ed` 在长度足够时剥掉（adopting→adopt、adopted→adopt）。
+    """
+    if not _LATIN_RE.match(word):
+        return word
+    w = word.lower().replace("'s", "").strip("'")
+    if w in _STEM_PROTECTED or w.endswith(("ss", "us", "is", "as")):
+        return w
+    if w.endswith("ies") and len(w) > 4:
+        return w[:-3] + "y"
+    if w.endswith("es") and len(w) > 4 and w[-3] in "sxz" or w.endswith(("ches", "shes")):
+        return w[:-2]
+    if w.endswith("s") and len(w) > 3:
+        return w[:-1]
+    if w.endswith("ing") and len(w) > 6:
+        return w[:-3]
+    if w.endswith("ed") and len(w) > 4:
+        return w[:-2]
+    return w
+
+
 def tokenize(text: str) -> list[str]:
-    """jieba 分词 + 停用词过滤 + 单字过滤（中文里单字噪声大）。
-    走 _jieba_tokens 缓存，行为不变。"""
-    return [w for w in _jieba_tokens(text) if len(w) > 1]
+    """jieba 分词 + 停用词过滤 + 单字过滤（中文里单字噪声大）＋ **拉丁词形归一**。
+
+    中文路径与行为不变（jieba→去停用词→去单字）；拉丁词额外过 `_stem_latin`
+    （小写 + 去屈折后缀），让英文/中英混排语料的词面通道也能对上。
+    走 `_jieba_tokens` 缓存（缓存的是**归一后**的结果）。"""
+    def _norm(w: str) -> str:
+        return _stem_latin(w)
+
+    return [_norm(w) for w in _jieba_tokens(text) if len(w) > 1]
 
 
 # ---------- 向量通道（Chroma，双池） ----------
@@ -237,6 +287,19 @@ def _normalize_collections(collections) -> dict:
     return {"mem": collections, "ep": collections}
 
 
+# SQL 表名白名单（安全审计 N20-②）：BM25 建索引用 `f"SELECT … FROM {tbl}"`，
+# 而这些位置不能参数绑定。表名全部来自本模块调用方写死的 `["memories", "episodes"]`，
+# 但仍收成白名单——**只允许这两个表**，别的一律抛。
+_ALLOWED_TABLES = frozenset({"memories", "episodes"})
+
+
+def _safe_table(name: str) -> str:
+    """表名白名单校验（不合法直接抛；把"只能拼"的位置收成"拼之前先校验"）。"""
+    if name not in _ALLOWED_TABLES:
+        raise ValueError(f"非白名单表名: {name!r}")
+    return name
+
+
 # chroma 的写入先进队列、由后台 compactor 落到 HNSW 段；查询可能在落地前跑，
 # 表现为**偶发"刚写的记忆检索不到"**（实测：段未就绪时抛
 # "Error creating hnsw segment reader: Nothing found on disk"，语义通道整条空掉）。
@@ -279,6 +342,118 @@ def _is_index_error(exc: Exception) -> bool:
     return any(k in text for k in ("segment", "nothing found on disk", "hnsw", "not found on disk"))
 
 
+# ---- 索引读失败的记录（B6）：谁读到了、什么原因，供 doctor／注入告警／测试读 ----
+_LAST_INDEX_ERROR = ""
+
+
+def take_index_error() -> str:
+    """取出最近一次"读向量索引失败"的原因（取完即清）。"""
+    global _LAST_INDEX_ERROR
+    err, _LAST_INDEX_ERROR = _LAST_INDEX_ERROR, ""
+    return err
+
+
+def clear_index_error() -> None:
+    """清掉记录的索引读失败原因。"""
+    global _LAST_INDEX_ERROR
+    _LAST_INDEX_ERROR = ""
+
+
+def _query_collection(collection, query: str, n: int, query_embedding=None):
+    """对集合发一次查询（两种入参形态共用一个出口，便于重试）。"""
+    if query_embedding is not None:
+        return collection.query(
+            query_embeddings=[list(query_embedding)], n_results=min(n, 1000), include=["distances", "metadatas"]
+        )
+    return collection.query(query_texts=[query], n_results=min(n, 1000), include=["distances", "metadatas"])
+
+
+def _parse_semantic(res) -> dict:
+    """chroma 查询结果 → {doc_id: {sim, kind}}（cosine 距离 → 相似度）。"""
+    ids = res["ids"][0]
+    dists = res["distances"][0]
+    metas = res["metadatas"][0]
+    out = {}
+    for doc_id, dist, meta in zip(ids, dists, metas, strict=False):
+        sim = 1.0 - dist  # cosine 相似度
+        if sim >= SEMANTIC_THRESHOLD:  # 语义粗滤门控
+            # [HIPPO] meta 可能是 None（历史索引里存在"无 metadata 的文档"，例如旧版本写入的
+            # 或跨版本迁移留下的）。缺失时按 memory 处理，**不让一条脏文档炸掉整条检索链**。
+            out[doc_id] = {"sim": sim, "kind": (meta or {}).get("kind", "memory")}
+    return out
+
+
+def rebuild_vector_pool(conn: sqlite3.Connection, client, key: str) -> int:
+    """**从源真相（memory.db）重建一个向量池**：删集合 → 按原配置重建 → 全量重灌。
+
+    为什么要有这条路（B6）：hnsw 段偶发读不到（`Error creating hnsw segment reader:
+    Nothing found on disk`）时，**重试没用、再 upsert 一次也没用**（实测：段 reader 建不起来
+    是索引侧状态问题，不是缺数据）；唯一实测有效的修法是把该集合整个重建一遍。
+    源真相是 memory.db，重建**只丢索引不丢记忆**。
+    key: "mem"（memories 池）｜"ep"（episodes 池）。返回重灌条数；失败抛异常由调用方兜。
+    """
+    from hippocampus.memory.config import get_embedding_config
+
+    if key not in ("mem", "ep"):
+        raise ValueError(f"未知向量池: {key}")
+    if client is None:
+        return 0
+    name = COLLECTION_MEM if key == "mem" else COLLECTION_EP
+    # 与 MemorySession 打开会话时同一套配置（同 EF、同距离度量），避免重建后空间不一致
+    emb = _resolve_embedding_function(get_embedding_config()["model"])
+    try:
+        client.delete_collection(name)
+    except Exception:
+        pass  # 集合可能已不存在：继续建
+    meta = {"hnsw:space": "cosine"}
+    col = (
+        client.get_or_create_collection(name, metadata=meta, embedding_function=emb)
+        if emb is not None
+        else client.get_or_create_collection(name, metadata=meta)
+    )
+    ids, docs, metas = _pool_docs(conn, key)
+    if ids:
+        col.upsert(ids=ids, documents=docs, metadatas=metas)
+    _wait_index_applied({key: col}, mem_count=len(ids) if key == "mem" else 0, ep_count=len(ids) if key == "ep" else 0)
+    return len(ids)
+
+
+def _semantic_with_repair(collection, query: str, *, n: int, query_embedding=None, repair=None) -> dict:
+    """调 `semantic_search`，对**不支持 `repair` 参数的替身**自动降级（只降级这一个参数）。
+
+    为什么要有：`semantic_search` 是本模块的**可替换接缝**（随迁测试用打桩替换它，
+    例如 `lambda collection, query, n=40, query_embedding=None: {…}`）；加了 `repair`
+    之后这些替身会 `TypeError`，而异常被上层软失败吞掉会表现成"注入莫名变空"。
+    这里只在报错信息明确是 "repair" 这个关键字参数时重试一次——不掩盖替身内部的真实错误。
+    """
+    try:
+        return semantic_search(collection, query, n=n, query_embedding=query_embedding, repair=repair)
+    except TypeError as e:
+        if "repair" not in str(e):
+            raise
+        return semantic_search(collection, query, n=n, query_embedding=query_embedding)
+
+
+def _pool_docs(conn: sqlite3.Connection, key: str) -> tuple[list[str], list[str], list[dict]]:
+    """源真相（memory.db）→ 某个向量池的 (ids, documents, metadatas)。"""
+    ids: list[str] = []
+    docs: list[str] = []
+    metas: list[dict] = []
+    if key == "mem":
+        for m in conn.execute("SELECT * FROM memories WHERE status='active'").fetchall():
+            m = dict(m)
+            ids.append(m["id"])
+            docs.append(m["content"])
+            metas.append({"kind": "memory", "type": m["type"], "priority": "high"})
+        return ids, docs, metas
+    for p in conn.execute("SELECT * FROM episodes").fetchall():
+        p = dict(p)
+        ids.append(p["id"])
+        docs.append(p["content"])
+        metas.append({"kind": "episode", "role": p["role"], "priority": p["priority"]})
+    return ids, docs, metas
+
+
 def sync_index(conn: sqlite3.Connection, collections=None) -> dict:
     """全量同步索引（幂等 upsert）。
     collections: 双池 dict {mem, ep} → memories 进 mem 池（metadata 含 type），
@@ -287,18 +462,8 @@ def sync_index(conn: sqlite3.Connection, collections=None) -> dict:
     返回 {"indexed", "memories", "episodes"}。
     """
     pools = _normalize_collections(collections)
-    mem_docs, mem_ids, mem_metas = [], [], []
-    for m in conn.execute("SELECT * FROM memories WHERE status='active'").fetchall():
-        m = dict(m)
-        mem_ids.append(m["id"])
-        mem_docs.append(m["content"])
-        mem_metas.append({"kind": "memory", "type": m["type"], "priority": "high"})
-    ep_docs, ep_ids, ep_metas = [], [], []
-    for p in conn.execute("SELECT * FROM episodes").fetchall():
-        p = dict(p)
-        ep_ids.append(p["id"])
-        ep_docs.append(p["content"])
-        ep_metas.append({"kind": "episode", "role": p["role"], "priority": p["priority"]})
+    mem_ids, mem_docs, mem_metas = _pool_docs(conn, "mem")
+    ep_ids, ep_docs, ep_metas = _pool_docs(conn, "ep")
     # [HIPPO] 无向量库（未装 chromadb）时池为 None：跳过向量 upsert，词法通道照常工作
     if mem_ids and pools.get("mem") is not None:
         pools["mem"].upsert(ids=mem_ids, documents=mem_docs, metadatas=mem_metas)
@@ -335,8 +500,43 @@ def embeddings_queue_depth(chroma_dir) -> int:
         return 0
 
 
+def enable_queue_autopurge(chroma_dir) -> bool:
+    """只写配置、不删数据：把 chroma 的 `automatically_purge` 打开（B6 根因处理）。
+
+    为什么只写配置：WAL（embeddings_queue）该由 chroma 的 compactor 在 compaction 之后自己回收。
+    我们手工 `DELETE FROM embeddings_queue` 属于改内部表（不受支持），实测会把还没落段的写入抹掉，
+    造成 `Nothing found on disk` 的间歇读失败——所以改成**只翻开关**，回收交给 chroma。
+    返回是否写入成功；无表/无库返回 False（调用方软失败）。
+    """
+    chroma_dir = Path(chroma_dir)
+    db_path = chroma_dir / "chroma.sqlite3"
+    if not db_path.exists():
+        return False
+    conn = sqlite3.connect(str(db_path))
+    try:
+        exists = conn.execute(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='embeddings_queue_config'"
+        ).fetchone()[0]
+        if not exists:
+            return False
+        payload = json.dumps({"automatically_purge": True, "_type": "EmbeddingsQueueConfigurationInternal"})
+        conn.execute(
+            "INSERT OR REPLACE INTO embeddings_queue_config (id, config_json_str) VALUES (1, ?)",
+            (payload,),
+        )
+        conn.commit()
+        return True
+    finally:
+        conn.close()
+
+
 def purge_embeddings_wal(chroma_dir) -> int:
-    """全量 sync_index 之后清空 Chroma WAL，并打开 automatically_purge。
+    """**手工清空 Chroma WAL**（危险操作：只保留给显式维护命令，不再自动调用）。
+
+    为什么不自动调用（B6 根因处理）：这是改 chroma 内部表，会把"还没被 compactor 落进
+    HNSW 段的写入"一起删掉，实测造成 `Nothing found on disk` 的间歇读失败。
+    自动路径改用 `enable_queue_autopurge()`（只翻开关，让 chroma 自己回收）。
+    保留本函数供 `hippocampus index purge-wal` 这类显式运维动作使用。
 
     embeddings_queue 是同进程 WAL：跨进程写入不会通知已打开的 PersistentClient；
     且非空库首次初始化会把 automatically_purge 设为 False，队列只增不删。
@@ -440,84 +640,77 @@ def _query_embedding(query: str) -> list:
     return list(_query_embedding_cached(text))
 
 
-def semantic_search(collection, query: str, n: int = TOP_K * OVER_FETCH, query_embedding=None) -> dict:
+def semantic_search(collection, query: str, n: int = TOP_K * OVER_FETCH, query_embedding=None, repair=None) -> dict:
     """向量检索，返回 {doc_id: {"sim", "kind"}}。Chroma cosine distance → sim = 1 - distance。
     保留 0.1 粗滤门控（防噪声入候选）；主流程绝对底线 0.3 在排序管线另行执行。
     query_embedding: 外部已计算的 query 向量（mem/ep 两池共用一次推理）；
-    None 时走 query_texts 由 Chroma 自行嵌入（旧调用方行为不变）。"""
+    None 时走 query_texts 由 Chroma 自行嵌入（旧调用方行为不变）。
+    repair: 读索引失败时的**重建回调**——重建该池并返回**新的集合句柄**（修不好返回 None）。
+    不给则读失败只重试一次。
+
+    读失败的三级处置（B6 根因处理，实测口径见 docs/roadmap.md）：
+      ① 等一拍重查（段可能刚落盘）；
+      ② 仍失败 → 调 `repair()` **从源真相（memory.db）重建向量池**——这是实测唯一有效的修法
+         （重试与"再 upsert 一次"都无效：段 reader 建不起来是索引侧状态问题，不是数据缺失）；
+      ③ 用**重建后的新句柄**重查（旧句柄指向已被删掉的集合）；仍失败才跳过语义通道并**大声报**
+         （不再静默空注入）。
+    """
+    global _LAST_INDEX_ERROR
     if n <= 0 or collection is None:
         # [HIPPO] 无向量库：语义通道返回空（其余通道照常，检索不中断）
         return {}
-    if query_embedding is not None:
-        try:
-            res = collection.query(
-                query_embeddings=[list(query_embedding)], n_results=min(n, 1000), include=["distances", "metadatas"]
+
+    def _attempt():
+        return _query_collection(collection, query, n, query_embedding)
+
+    try:
+        res = _attempt()
+    except Exception as e:
+        # P02 任务 1 维度保护（防静默事故）：集合维度≠当前模型维度 →
+        # 明确提示 + 跳过语义通道不崩（BM25/图通道照常，检索不中断）
+        if "dimension" in str(e).lower():
+            print(
+                "[warning] embedding 模型已更换（集合向量维度 ≠ 当前模型"
+                "维度），需在控制台重建索引；本次查询跳过语义通道（BM25/图"
+                "通道照常）",
+                file=sys.stderr,
             )
-        except Exception as e:
-            # P02 任务 1 维度保护（防静默事故）：集合维度≠当前模型维度 →
-            # 明确提示 + 跳过语义通道不崩（BM25/图通道照常，检索不中断）
-            if "dimension" in str(e).lower():
-                print(
-                    "[warning] embedding 模型已更换（集合向量维度 ≠ 当前模型"
-                    "维度），需在控制台重建索引；本次查询跳过语义通道（BM25/图"
-                    "通道照常）",
-                    file=sys.stderr,
+            return {}
+        if not _is_index_error(e):
+            raise
+        _LAST_INDEX_ERROR = f"{type(e).__name__}: {e}"
+        import time as _time
+
+        _time.sleep(_INDEX_READY_INTERVAL_S * 2)
+        try:
+            res = _attempt()
+        except Exception as e2:
+            _LAST_INDEX_ERROR = f"{type(e2).__name__}: {e2}"
+            if repair is not None:
+                try:
+                    new_col = repair()  # 重建并拿到**新句柄**（旧句柄指向已删除的集合）
+                    if new_col is not None:
+                        collection = new_col
+                        res = _attempt()  # 用重建后的新句柄再查一次
+                    else:
+                        sys.stderr.write("[index] 向量索引重建未成功（见上方告警）\n")
+                        return {}
+                except Exception as e3:
+                    _LAST_INDEX_ERROR = f"重建失败 {type(e3).__name__}: {e3}"
+                    sys.stderr.write(
+                        f"[index] 语义通道读索引失败、且重建未成功（本次跳过语义通道；"
+                        f"其余通道照常）：{e3}\n"
+                        "  提示：`hippocampus doctor` 看索引健康，`hippocampus index rebuild` 可手动重建\n"
+                    )
+                    return {}
+            else:
+                sys.stderr.write(
+                    f"[index] 语义通道读索引失败（已重试一次，本次跳过语义通道；"
+                    f"其余通道照常）：{e2}\n"
+                    "  提示：`hippocampus doctor` 看索引健康，`hippocampus index rebuild` 可手动重建\n"
                 )
                 return {}
-            if _is_index_error(e):
-                # [HIPPO] 索引段偶发读不到（写入还在后台 compactor 队列里）→ **自愈一次**：
-                # 等一拍再查；仍不行就**大声报**（不再静默空注入——这曾是"明明有记忆却检索不到"
-                # 的隐蔽原因）。返回空只影响语义通道，BM25/图/事件照常。
-                import time as _time
-
-                _time.sleep(_INDEX_READY_INTERVAL_S * 2)
-                try:
-                    res = collection.query(
-                        query_embeddings=[list(query_embedding)],
-                        n_results=min(n, 1000),
-                        include=["distances", "metadatas"],
-                    )
-                except Exception as e2:
-                    sys.stderr.write(
-                        f"[index] 语义通道读索引失败（已重试一次，本次跳过语义通道；"
-                        f"其余通道照常）：{e2}\n"
-                        "  提示：`hippocampus doctor` 看索引健康，必要时重建索引\n"
-                    )
-                    return {}
-            else:
-                raise
-    else:
-        try:
-            res = collection.query(query_texts=[query], n_results=min(n, 1000), include=["distances", "metadatas"])
-        except Exception as e:
-            if _is_index_error(e):
-                import time as _time
-
-                _time.sleep(_INDEX_READY_INTERVAL_S * 2)
-                try:
-                    res = collection.query(
-                        query_texts=[query], n_results=min(n, 1000), include=["distances", "metadatas"]
-                    )
-                except Exception as e2:
-                    sys.stderr.write(
-                        f"[index] 语义通道读索引失败（已重试一次，本次跳过语义通道）：{e2}\n"
-                    )
-                    return {}
-            elif "dimension" in str(e).lower():
-                return {}
-            else:
-                raise
-    ids = res["ids"][0]
-    dists = res["distances"][0]
-    metas = res["metadatas"][0]
-    out = {}
-    for doc_id, dist, meta in zip(ids, dists, metas, strict=False):
-        sim = 1.0 - dist  # cosine 相似度
-        if sim >= SEMANTIC_THRESHOLD:  # 语义粗滤门控
-            # [HIPPO] meta 可能是 None（历史索引里存在"无 metadata 的文档"，例如旧版本写入的
-            # 或跨版本迁移留下的）。缺失时按 memory 处理，**不让一条脏文档炸掉整条检索链**。
-            out[doc_id] = {"sim": sim, "kind": (meta or {}).get("kind", "memory")}
-    return out
+    return _parse_semantic(res)
 
 
 # ---------- BM25 通道 ----------
@@ -537,11 +730,11 @@ def _db_fingerprint(conn: sqlite3.Connection, tables: list[str]) -> str:
         path = "?"
     parts = [path, "|".join(sorted(tables))]
     for tbl in tables:
-        cnt = conn.execute(f"SELECT COUNT(*) FROM {tbl}").fetchone()[0]
+        cnt = conn.execute(f"SELECT COUNT(*) FROM {_safe_table(tbl)}").fetchone()[0]
         parts.append(f"{tbl}:{cnt}")
         for col in ("updated_at", "created_at"):
             try:
-                maxv = conn.execute(f"SELECT MAX({col}) FROM {tbl}").fetchone()[0]
+                maxv = conn.execute(f"SELECT MAX({col}) FROM {_safe_table(tbl)}").fetchone()[0]
                 parts.append(f"{tbl}.{col}:{maxv}")
                 break
             except sqlite3.OperationalError:
@@ -561,7 +754,7 @@ def build_bm25(conn: sqlite3.Connection, tables: list[str] | None = None) -> dic
         return cached
     docs = {}  # doc_id -> 分词列表
     for tbl in tables:
-        for row in conn.execute(f"SELECT id, content FROM {tbl}").fetchall():
+        for row in conn.execute(f"SELECT id, content FROM {_safe_table(tbl)}").fetchall():
             tokens = tokenize(row["content"])
             if tokens:
                 docs[row["id"]] = tokens
@@ -843,7 +1036,7 @@ def _apply_max_items(final: list[dict], max_items: int) -> tuple[list[dict], dic
 def _lookup_content(conn: sqlite3.Connection, doc_id: str, kind: str) -> str:
     """doc_id → content（est_tokens 用）。"""
     tbl = "memories" if kind == "memory" else "episodes"
-    row = conn.execute(f"SELECT content FROM {tbl} WHERE id=?", (doc_id,)).fetchone()
+    row = conn.execute(f"SELECT content FROM {_safe_table(tbl)} WHERE id=?", (doc_id,)).fetchone()
     return row["content"] if row else ""
 
 
@@ -888,7 +1081,13 @@ def _info_density_rank(rows: dict[str, dict]) -> list[str]:
 
 
 def episode_clue_search(
-    conn: sqlite3.Connection, query: str, collections: dict, now_ms: int, top_k: int = 8, query_embedding=None
+    conn: sqlite3.Connection,
+    query: str,
+    collections: dict,
+    now_ms: int,
+    top_k: int = 8,
+    query_embedding=None,
+    repair=None,
 ) -> dict:
     """事件层线索通道：时间/会话/实体/主题四线索解析 → 组合叠加（交集）→ 路径 A/B 精排。
     返回：
@@ -896,6 +1095,7 @@ def episode_clue_search(
        "clues": {...}, "cliff_info": {...}, "budget_info": {...}}
     结果条目：{doc_id, channel:"event", channel_rank, score, kind:"episode", est_tokens}。
     query_embedding: 复用 retrieve 已算的 query 向量（None 时自行计算，旧调用方兼容）。
+    repair: 读索引失败时的重建回调（透传给 semantic_search；返回重建后的新集合句柄）。
     """
     params = get_active_params(conn)
     clue_limit = int(params.get("event_clue_limit", DEFAULT_EVENT_CLUE_LIMIT))
@@ -958,7 +1158,9 @@ def episode_clue_search(
     # ---- 4) 主题线索兜底：语义（ep 池）+ BM25 全经历层（双门槛防中文虚高）----
     # 语义近 ∧ 词面有交集（raw>0）才算「主题相关」；纯语义会被「你好」类垃圾激活
     try:
-        sem_ep = semantic_search(collections["ep"], query, n=clue_limit, query_embedding=query_embedding)
+        sem_ep = _semantic_with_repair(
+            collections["ep"], query, n=clue_limit, query_embedding=query_embedding, repair=repair
+        )
     except Exception:
         sem_ep = {}
     topic_rows = {}
@@ -1094,6 +1296,7 @@ def retrieve(
     top_k: int = 8,
     session_id: str | None = None,
     flow: str = "user",
+    repair=None,
 ) -> dict:
     """v6 分层检索主入口（任务书 3 的依赖接口）：
     经验层三通道（mem 池：语义/BM25/图）各自独立打分 → 各自绝对底线 → 各自断崖
@@ -1102,6 +1305,8 @@ def retrieve(
     主路径零 LLM（查询实体机械匹配，无任何大模型调用）。
     collections: 双池 dict {mem, ep}；兼容单 collection 对象/None（见 _normalize_collections）。
     flow: 三流标记（首轮/用户/自主），本份透传占位，行为由任务书 3 注入侧使用。
+    repair: 读向量索引失败时的**重建回调**（重建并返回新的集合句柄，修不好返回 None）；
+    不给则读失败只重试一次（见 semantic_search 的三级处置）。
     返回 {'results': [...], 'channels': {...}}。
     """
     pools = _normalize_collections(collections)
@@ -1151,7 +1356,9 @@ def retrieve(
     # 2. 经验层三通道（mem 池）——各自独立打分
     # query embedding 只算一次，mem/ep 两池共用（任务书 8b 任务 1：复用 + LRU）
     q_emb = _query_embedding(query)
-    semantic_raw = semantic_search(pools["mem"], query, n=top_k * OVER_FETCH, query_embedding=q_emb)
+    semantic_raw = _semantic_with_repair(
+        pools["mem"], query, n=top_k * OVER_FETCH, query_embedding=q_emb, repair=repair
+    )
     semantic = {d: v["sim"] for d, v in semantic_raw.items()}  # 拍平为分数
     if index is None:
         mem_index = build_bm25(conn, ["memories"])
@@ -1211,7 +1418,21 @@ def retrieve(
                     graph_sorted = graph_sorted[: cliff_info["graph"]["kept"]]
 
     # 6. 事件层线索通道（ep 池，分轨不互相否决）
-    event = episode_clue_search(conn, query, pools, now_ms=db.now_ms(), top_k=top_k, query_embedding=q_emb)
+    event = episode_clue_search(
+        conn, query, pools, now_ms=db.now_ms(), top_k=top_k, query_embedding=q_emb, repair=repair
+    )
+
+    # 6b. [HIPPO] 图通道**同分内词面重排**（英文语料实测暴露的真问题）：
+    # 图通道给的是离散分（0.5/0.3/0.15），**同分候选之间没有任何相关性排序**——问
+    # "When did Caroline go to the LGBTQ support group?" 时，"Caroline" 这个实体名下有
+    # 30 条记忆同为 0.5 分，注入只有 8 个位子 → 位子被同题无关的同行记忆占满，**真正回答
+    # 这个问题的那条排在随机的第 7/8 位甚至被截掉**。这里只改**同分内部**的次序：
+    # 用 BM25 原始分（词面相关度）当 tie-break，分数本身仍是通道分（跨通道禁比分数）。
+    if graph_sorted and bm25_raw:
+        graph_sorted = sorted(
+            graph_sorted,
+            key=lambda kv: (-kv[1], -float(bm25_raw.get(kv[0], 0.0)), str(kv[0])),
+        )
 
     # 7. 合并集：区块顺序（语义 → BM25 → 图 → 事件层），跨通道 doc 去重（先到先得）
     def _block_items(sorted_pairs, channel: str) -> list[dict]:

@@ -15,8 +15,6 @@
 - 软失败：记录异常记 stderr，绝不影响注入/确认主流程
 """
 
-import json
-import sys
 from pathlib import Path
 from typing import Any
 
@@ -29,13 +27,10 @@ def observe_path(account_id: str) -> Path:
 
 
 def _append(account_id: str, event: dict[str, Any]) -> None:
-    try:
-        path = observe_path(account_id)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(event, ensure_ascii=False) + "\n")
-    except Exception as e:
-        sys.stderr.write(f"[observe] 观察记录失败（不中断）: {e}\n")
+    """追加一条观察事件（D1：与审计同一套大小轮转；软失败不中断主流程）。"""
+    from hippocampus.memory import jsonl_log
+
+    jsonl_log.append_jsonl(observe_path(account_id), event)
 
 
 def log_injection(account_id: str, query: str, injected_ids: list[str]) -> None:

@@ -50,14 +50,67 @@ def _resolve_entity(conn: sqlite3.Connection, name: str, ent_type: str, aliases:
     return db.add_entity(conn, name, ent_type or "Abstract", aliases=aliases or [])
 
 
-def extract_entities_only(text: str) -> list[dict]:
-    """单次实体提取（只提实体），失败返回空列表"""
+def _rule_entity_names(text: str) -> list[str]:
+    """规则实体抽取（**离线档边界**，B4）：复用 write() 那套机械判据（jieba 分词 → 去停用词
+    与偏好提示词 → 取最长词，等长取最后＝宾语倾向），只取一个实体名。
+
+    为什么要有它：守卫的价值是"把漏抽的实体补回来"，而前身这条链**只依赖 LLM**——
+    离线档下每次抛 LLMUnavailable、守卫只累计 attempts 不生效（"空转"）。
+    规则抽取让离线档的守卫**真的改动数据**，边界写进 docs/offline.md。
+    """
     try:
-        r = chat_json(ENTITY_ONLY_SYSTEM, text, max_tokens=1500)
-        return r.get("entities", []) or []
-    except Exception as e:
-        print(f"  [漏提取·实体提取失败] {e}")
+        import jieba
+
+        from hippocampus.memory import retrieval as rt
+        from hippocampus.memory.memory_bridge import _PREFERENCE_HINTS
+
+        toks = [
+            w
+            for w in jieba.lcut(text or "")
+            if w.strip() and len(w) > 1 and w not in rt.STOPWORDS and w not in _PREFERENCE_HINTS
+        ]
+        if not toks:
+            return []
+        best = max(toks, key=len)
+        for w in reversed(toks):  # 等长时取最后（宾语倾向）
+            if len(w) == len(best):
+                return [w]
+        return [best]
+    except Exception:
         return []
+
+
+# 最近一次实体提取走的哪条路（"llm" / "rules" / "none"）：观测与测试用，不参与逻辑
+_LAST_ENTITY_SOURCE = "none"
+
+
+def last_entity_source() -> str:
+    """上一次 `extract_entities_only` 用的抽取方式（llm／rules／none）。"""
+    return _LAST_ENTITY_SOURCE
+
+
+def extract_entities_only(text: str) -> list[dict]:
+    """单次实体提取（只提实体）；**模型不可用时退规则抽取**（离线档守卫不空转）。
+
+    边界（写进 docs/offline.md）：
+    - 有模型端点 → 走 LLM（原行为）；
+    - 离线档 / 无端点 → 规则抽取（jieba 最长实义词，最多补 1 个实体）；
+    - 端点在但调用失败 → 也退规则抽取（守卫不该因为一次调用失败就空转）。
+    """
+    global _LAST_ENTITY_SOURCE
+    from hippocampus.settings import llm_available
+
+    if llm_available():
+        try:
+            r = chat_json(ENTITY_ONLY_SYSTEM, text, max_tokens=1500)
+            ents = r.get("entities", []) or []
+            _LAST_ENTITY_SOURCE = "llm" if ents else "none"
+            return ents
+        except Exception as e:
+            print(f"  [漏提取·实体提取失败→转规则抽取] {e}")
+    names = _rule_entity_names(text)
+    _LAST_ENTITY_SOURCE = "rules" if names else "none"
+    return [{"name": n, "type": "Abstract", "aliases": []} for n in names]
 
 
 def scan_and_fix(conn: sqlite3.Connection, verbose: bool = True, max_episodes: int = 20) -> int:

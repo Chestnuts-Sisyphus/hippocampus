@@ -289,7 +289,7 @@ def test_get_bridge_isolated(tmp_path, monkeypatch):
 
 
 def test_get_bridge_drains_embeddings_queue(tmp_path, monkeypatch):
-    """发现 31：会话初始化时清空积压的 embeddings_queue。"""
+    """发现 31 → B6 口径变更：会话初始化**不再手工清** embeddings_queue，只做源真相全量同步。"""
     import sqlite3
 
     from hippocampus.memory import account
@@ -317,11 +317,23 @@ def test_get_bridge_drains_embeddings_queue(tmp_path, monkeypatch):
     monkeypatch.setattr("hippocampus.memory.memory_bridge.chromadb.PersistentClient", lambda path: _FakeClient())
     monkeypatch.setattr("hippocampus.memory.memory_bridge.rt._resolve_embedding_function", lambda _m: None)
     monkeypatch.setattr("hippocampus.memory.memory_bridge.rt.build_bm25", lambda _c: None)
-    monkeypatch.setattr("hippocampus.memory.memory_bridge.rt.sync_index", lambda *_a, **_k: None)
+    _sync_calls = {"n": 0}
+
+    def _count_sync(*_a, **_k):
+        _sync_calls["n"] += 1
+
+    monkeypatch.setattr("hippocampus.memory.memory_bridge.rt.sync_index", _count_sync)
     monkeypatch.setattr("hippocampus.memory.memory_bridge.fb.seed_default_params", lambda _c: None)
     mb.drop_bridge(aid)
     try:
         mb.get_bridge(aid)
-        assert rt.embeddings_queue_depth(chroma_dir) == 0
+        # [HIPPO] 口径变更（B6 根因处理）：会话初始化**不再手工删** chroma 的
+        # embeddings_queue（改内部表会把"还没落段的写入"一起抹掉，实测造成
+        # "Nothing found on disk" 的间歇读失败）。新契约＝队列非空时做一次
+        # **源真相全量 upsert** ＋ 打开 chroma 自己的 automatically_purge；
+        # 行数不减（数据不丢），回收交给 chroma。
+        assert rt.embeddings_queue_depth(chroma_dir) == 3, "不得再手工清 chroma 的队列行"
+        # 该走的那一步（幂等全量同步）确实被调到了：sync_index 在这里被替身计数
+        assert _sync_calls["n"] >= 1, "队列非空时应做一次源真相全量同步"
     finally:
         mb.drop_bridge(aid)

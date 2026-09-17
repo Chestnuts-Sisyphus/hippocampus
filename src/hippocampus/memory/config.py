@@ -48,9 +48,17 @@ DEFAULT_CONFIG: dict[str, Any] = {
     #   推荐档 onnx:bge-small-zh-v1.5：中文质量更好，需本地模型（见 docs/embedding.md）
     "embedding": {"model": "builtin-hash", "enabled": True},
     # 确认块（A39）：由记忆层追加到响应文本，不由模型生成；开关在此
-    "proxy": {"port": DEFAULT_PORT, "host": "127.0.0.1", "confirm_block": True},
+    "proxy": {
+        "port": DEFAULT_PORT,
+        "host": "127.0.0.1",
+        "confirm_block": True,
+        # 未显式传 session 头时的分桶策略：day（默认，按天）/hour/none（不分桶，固定一个 session）
+        "session_bucketing": "day",
+    },
     "agent": {"max_steps": 8, "model": "", "confirm_block": True},
     "security": {"enabled": True},
+    # 观测文件的磁盘治理（D1）：单文件上限 + 保留的滚动份数（soft上限，见 memory/jsonl_log.py）
+    "observability": {"jsonl_max_bytes": 8 * 1024 * 1024, "jsonl_keep": 3},
     "offline": {"enabled": False},
 }
 
@@ -173,10 +181,14 @@ def get_security_config() -> dict:
 
 def get_proxy_config() -> dict:
     cfg = get_config().get("proxy") or {}
+    bucketing = str(os.environ.get("HIPPOCAMPUS_SESSION_BUCKETING") or cfg.get("session_bucketing") or "day").lower()
+    if bucketing not in ("day", "hour", "none"):
+        bucketing = "day"  # 非法值退回默认（配置手改出错不该让代理起不来）
     return {
         "host": str(cfg.get("host") or "127.0.0.1"),
         "port": int(os.environ.get("HIPPOCAMPUS_PORT") or cfg.get("port") or DEFAULT_PORT),
         "confirm_block": bool(cfg.get("confirm_block", True)),
+        "session_bucketing": bucketing,
     }
 
 
