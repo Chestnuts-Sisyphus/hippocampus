@@ -1,8 +1,8 @@
 # 公开基准评测（LoCoMo / LongMemEval）
 
 > 这份文档说明：**怎么跑、跑的是什么口径、数字的边界在哪**。
-> 数字本身写在 `docs/roadmap.md` 与结果报告里；**官方分**（LLM 作答 + LLM 判分）本项目
-> 在离线档不报——报了就是编。
+> 数字本身写在 `docs/roadmap.md` 与结果报告里；**官方分**（LLM 作答 + LLM 判分）已实现，
+> 走 `bench --model-arm` 显式开关（见 §二·三）——离线档不报，不显式开就不出站、不编数字。
 
 ## 一、取数据（钉版本 + 校验 sha256）
 
@@ -45,10 +45,9 @@ hippocampus bench locomo --data <同上> --no-memories
 hippocampus bench locomo --data <同上> --inject-max-items 20
 ```
 
-**基准默认钉在离线档**（不发出站请求）。`--online` 只放开"允许联网"这道闸
-（**不是**模型臂实现）：官方口径要两步——**大模型基于注入上下文作答** + **LLM 判分**——
-这两步**本项目尚未实现**（当前只到"证据/答案是否进上下文 ＋ 词面 F1"）。要报官方分，
-先补这两步再谈端点。`--online` 存在的意义是：连上端点时能把维护链的软失败路径也测到。
+**基准默认钉在离线档**（不发出站请求）。`--online` 只是"允许联网"这道闸（让维护链的
+软失败路径也能测）；**官方分走 `--model-arm`**（§二·三）：模型作答 + LLM 判分两步已实现，
+但必须显式开——不开就不出站、不花钱。
 此前在"环境里有 key"的情况下跑基准，记忆层的维护链对模型端点发了 205 次请求（全 401）——
 既不可复现，也可能烧掉用户的钱，所以这一条是纪律而不是可选项。
 
@@ -84,6 +83,41 @@ HIPPOCAMPUS_OFFLINE=1 .venv/Scripts/python.exe scripts/bench_ab.py \
 > 池化方式按模型官方配置（bge＝CLS、gte＝mean）：拿错池化会得到"越换越差"的假结论。
 > 换档只影响**查询侧**吗？不是——文档侧向量也变，所以**换档必须重新导入**（A/B 脚本按数据根隔离）。
 
+### 二·三 官方判分臂（显式开关 `--model-arm`）
+
+官方口径要两步：**模型基于注入上下文作答** ＋（LongMemEval）**LLM 判分**。prompt 与判分
+算法**逐一对应官方仓库钉死的 revision**（实现见 `src/hippocampus/eval/model_arm.py`）：
+
+| 基准 | 官方出处（钉 revision） | 判分口径 |
+|---|---|---|
+| LoCoMo-10 | `snap-research/locomo` @`3eb6f2c`（ACL'24） | 模型作答（官方 QA_PROMPT，temp 0）后按官方 `evaluation.py` 判分：cat1 拆子答案取 max、cat2/3/4 Porter 词干词面 F1、cat5 判拒答（"not mentioned / no information available"）；总体＝每题均值 |
+| LongMemEval-oracle | `xiaowu0162/LongMemEval` @`9e0b455`（ICLR'25） | 官方生成 prompt（history_format=full，temp 0，max_tokens 500）＋官方 `get_anscheck_prompt` 逐题型 judge（temp 0、max_tokens 10，`'yes' in lower` 为对；`_abs` 题走 abstention 模板）→ 准确率 |
+
+**唯一输入差异（口径脚注，对照表每行必带）**：官方喂的是**全文**，我们喂的是**记忆层
+选出的注入上下文（top-8，`inject_finalize` 原文）**——这正是要测的东西（记忆系统选得
+对不对），所以我们的数字**不与全文基线直接等同**，要同表、带脚注地比。
+
+```bash
+# 需要环境变量：HIPPOCAMPUS_API_KEY（或密钥服务）、HIPPOCAMPUS_BASE_URL、HIPPOCAMPUS_MODEL
+# 护栏（写死在实现里，可调）：并发 16、失败重试 2、单调用超时 120 s、预算 ¥30 硬停
+# （按 usage 估算花费累计；跑前/跑后各查一次余额，实际花费＝余额差）
+export HIPPOCAMPUS_BASE_URL="https://api.deepseek.com/v1" HIPPOCAMPUS_MODEL="deepseek-chat"
+
+# LME-oracle 官方判分（全量 500 题会花几分钟到十几分钟；--limit 控制抽样）
+HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-small-en-v1.5" \
+  hippocampus bench longmemeval --data D:/tmp/hc-bench/longmemeval_oracle.json \
+  --limit 200 --model-arm --json D:/tmp/hc-bench/lme_official.json
+
+# LoCoMo-10 官方判分（全量 1986 题 ≈ 2000 次调用）
+HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-small-en-v1.5" \
+  hippocampus bench locomo --data D:/tmp/hc-bench/locomo10.json \
+  --model-arm --json D:/tmp/hc-bench/loco_official.json
+```
+
+报告 JSON 的 `official` 段含：模型名／temperature／并发／重试／超时／预算、`input_spec`
+（8 条注入非全文）、调用次数、tokens、估算花费、**跑前/跑后余额与实际花费**、逐题
+prediction/label/error、失败数与跳过数（有失败必须在报告里如实写"未跑完"）。
+
 ## 三、口径（写在表头上，别让读者猜）
 
 | 项 | 本项目怎么算 |
@@ -95,14 +129,16 @@ HIPPOCAMPUS_OFFLINE=1 .venv/Scripts/python.exe scripts/bench_ab.py \
 | `evidence_in_context` | 金标准证据原文（LoCoMo 的 `evidence` dia_id 对应轮；LongMemEval 的 `answer_session_ids` 会话）进上下文 |
 | `token_f1` | 离线作答器＝注入里分数最高的条目原文；**无模型生成**，所以 F1 只是诊断值，不是"答得好不好" |
 | tokens / 延迟 | 上下文按 `len//2+40` 估算；延迟＝单题 `inject_finalize` 的墙钟（p50/p95） |
-| 判分 | **无 LLM 判分**：官方口径要用大模型作答 + 判分，本项目离线档不报官方分 |
+| 判分 | 离线档**无 LLM 判分**（`token_f1` 只是诊断值）；官方分走 §二·三 的 `--model-arm`（显式开关才出站） |
 
 ### 为什么绝对分不可能高（如实说）
 1. **语料是英文**，而本项目的分词、停用词、阈值、句法抽取都是**为中文标定**的（默认嵌入档
    `builtin-hash` 是词法级哈希向量，英文同义改写召回弱）——这是实测偏低的主因。
 2. **只注入 top-8 条**：LoCoMo 官方给模型的是**整段对话**（数百轮），本项目给的是记忆层
-   筛出来的 8 条；两者不是同一件事，**不能把本文的分数和"把整段对话喂给模型"的报分直接比**。
-3. 离线档的"作答器"是引文（不做生成、不做推理），多跳/时间推理题天然吃亏。
+   筛出来的 8 条；两者不是同一件事，**官方分也因此不能与"全文基线"直接等同**——
+   要同表、带口径脚注地比（§二·三）。
+3. 离线档的"作答器"是引文（不做生成、不做推理），多跳/时间推理题天然吃亏；`--model-arm`
+   的模型作答不受此限，但受第 2 条的输入限制。
 
 ## 四、复跑与回归
 
