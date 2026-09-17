@@ -7,8 +7,8 @@
     proxy     代理形态：OpenAI 兼容端点
     chat      Agent 形态：跑一个任务（--offline 时只做记忆管理与检索问答）
     replay    用记录重跑一个轨迹（不是播放录像）
-    explain   解释某一步注入了什么、为什么没注入别的
-    memory    list／pending／candidates／review／off
+    explain   解释某一步注入了什么、为什么没注入别的（含 top-50 审计候选）
+    memory    list／pending／candidates／review（--pending/--candidates/--suspicious）／off
     learning  off／on（学习开关）
 
 设计纪律：不弹窗、不抢焦点；所有输出走 stdout/stderr，长任务写文件而不是开窗口。
@@ -79,6 +79,22 @@ def cmd_doctor(args: argparse.Namespace) -> int:
           f"episodes {stats['episodes']} / relations {stats['relations']}")
     print(f"  待确认        pending {stats['pending']} / candidates {stats['candidates']}")
 
+    # 索引健康（B5）：chroma 可写性 + 集合条数 vs 库内 active 条数 + 同步错误
+    health = core.index_health(scope)
+    if health["collection_count"] is None:
+        print("  索引健康      词法档（未启用向量集合，BM25 索引随写重建；无 chroma 一致性风险）")
+    else:
+        state = "健康" if health["healthy"] else "异常"
+        parts = [
+            f"状态 {state}",
+            f"chroma 可写 {'是' if health['chroma_writable'] else '否（只读/磁盘满）'}",
+            f"集合 {health['collection_count']} vs 库内 active {health['active_memories']}",
+            f"索引积压队列 {health['embeddings_queue']}",
+        ]
+        if health["last_error"]:
+            parts.append(f"上次同步错误 {health['last_error'][:80]}")
+        print("  索引健康      " + "  /  ".join(parts))
+
     tier = core.embedding_tier()
     download = "需联网下载一次" if tier["needs_download"] else "零下载"
     print(f"  嵌入档        {tier['model']}（{tier['tier']}，{download}）")
@@ -95,6 +111,16 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         if not llm["api_key"]:
             missing.append("凭据")
         print(f"  模型端点      未配置（缺 {'、'.join(missing)}）→ 可用 --offline 运行记忆纪律")
+
+    # 实例令牌（A2）：只显前 8 位
+    from hippocampus.settings import instance_token
+
+    token = instance_token()
+    if token:
+        print(f"  实例令牌      已启用（前 8 位 {token[:8]}…，完整令牌见 <数据根>/instance_token；"
+              "代理请求带 `Authorization: Bearer <令牌>`）")
+    else:
+        print("  实例令牌      未启用（`hippocampus proxy` 首次启动会自动生成）")
 
     if getattr(args, "unlock", False):
         done = core.unlock(scope)
@@ -140,7 +166,16 @@ def cmd_demo(args: argparse.Namespace) -> int:
 
     core = _core(args)
     scope = _scope(args)
-    report = run_bundle(core, scope, questions=args.questions, memories=args.memories, offline=True)
+    report = run_bundle(
+        core,
+        scope,
+        questions=args.questions,
+        memories=args.memories,
+        offline=True,
+        pass_k=args.pass_k,
+        model_arm=args.model,
+        baseline=args.baseline,
+    )
     print(report.render())
     if args.json:
         Path(args.json).write_text(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
@@ -187,11 +222,21 @@ def cmd_replay(args: argparse.Namespace) -> int:
 
 
 def cmd_explain(args: argparse.Namespace) -> int:
-    from hippocampus.explain import explain_step
+    from hippocampus.explain import default_audit_path, explain_run, explain_step
+    from hippocampus.memory import audit as audit_mod
 
     path = Path(args.run)
     data = json.loads(path.read_text(encoding="utf-8"))
-    print(explain_step(data, args.step))
+    audit_path = Path(args.audit) if getattr(args, "audit", None) else default_audit_path(data)
+    audit_events = audit_mod.load_events(audit_path)
+    observe_events = audit_mod.load_events(
+        Path(data.get("home") or ".") / "accounts" / ((data.get("scope") or {}).get("account") or "default")
+        / "observe.jsonl"
+    )
+    if args.step:
+        print(explain_step(data, args.step, audit_events))
+    else:
+        print(explain_run(data, audit_events, observe_events))
     return 0
 
 
@@ -246,6 +291,34 @@ def cmd_memory(args: argparse.Namespace) -> int:
             print(f"  [{item.kind}] {item.content}   id={item.id}  （等确认，未参与注入/去重）")
         return 0
 
+    if action == "review":
+        if args.suspicious:
+            rows = core.suspicious(scope)
+            if not rows:
+                print("（无可疑项）")
+            for row in rows:
+                flag = " / ".join(row["flags"]) if row["flags"] else "-"
+                print(f"  [{row['kind']}] {row['content']}   id={row['id']}  （{flag}）")
+            return 0
+        if args.pending:
+            blocks = core.pending_blocks(scope)
+            if not blocks:
+                print("（无未决确认块）")
+            for blk in blocks:
+                days_left = blk["ttl_remaining_ms"] / 86400000.0
+                print(f"  块 {blk['block_id']}  创建于 {blk['created_at']}  TTL 剩余 {days_left:.1f} 天")
+                for e in blk["entries"]:
+                    whose = "新记录" if e["is_new"] else "旧记录"
+                    print(f"    [{e['num']}]（{e['kind']}）{e['content']}  -- {whose}   id={e['id']}")
+            return 0
+        # 默认视图 = candidates（可疑候选）
+        items = core.list_memories(scope, limit=args.limit, status="candidate", include_shadow=True)
+        if not items:
+            print("（无可疑候选）")
+        for item in items:
+            print(f"  [{item.kind}] {item.content}   id={item.id}  （等确认，未参与注入/去重）")
+        return 0
+
     if action in ("delete", "forget"):
         ok = core.delete_memory(scope, args.id, reason=args.reason or "用户删除")
         print("已归档（软删，可追溯）" if ok else "未找到该记忆")
@@ -286,6 +359,39 @@ def cmd_learning(args: argparse.Namespace) -> int:
     return 0
 
 
+def cmd_export(args: argparse.Namespace) -> int:
+    from hippocampus.core.transfer import export_package
+
+    core = _core(args)
+    scope = _scope(args)
+    manifest = export_package(core, scope, args.target)
+    print(f"已导出 → {Path(args.target).resolve()}")
+    print(f"  schema 版本 {manifest['schema_version']}／应用版本 {manifest['app_version']}／"
+          f"scope {manifest['account']}")
+    print(f"  库内计数 {manifest['counts']}")
+    print("  （导出的是源真相 memory.db；向量索引在导入端重建）")
+    core.close()
+    return 0
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    from hippocampus.core.transfer import import_package
+
+    core = _core(args)
+    scope = _scope(args)
+    try:
+        result = import_package(core, scope, args.source, force=args.force)
+    except (ValueError, FileExistsError) as e:
+        print(f"导入失败：{e}", file=sys.stderr)
+        core.close()
+        return 1
+    print(f"已导入 ← {Path(args.source).resolve()}")
+    print(f"  包内账号 {result['manifest'].get('account')} → 当前 scope {scope.account}")
+    print(f"  导入后计数 {result['stats']}")
+    core.close()
+    return 0
+
+
 # ----------------------------------------------------------------------
 # argparse 装配
 # ----------------------------------------------------------------------
@@ -307,8 +413,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_seed)
 
     p = sub.add_parser("demo", help="一键跑评测题并打印结果表")
-    p.add_argument("--questions", type=int, default=10, help="题目数（投递前最小版 10）")
+    p.add_argument("--questions", type=int, default=10, help="题目数（完整集 20）")
     p.add_argument("--memories", action="store_true", help="跑记忆开/关对照")
+    p.add_argument("--pass-k", type=int, default=1, help="每题重复 k 次全过才算过（N8 pass^k）")
+    p.add_argument("--model", action="store_true", help="加模型臂（需配置模型端点；离线档自动跳过）")
+    p.add_argument("--baseline", action="store_true", help="加关键词基线对照臂（仅 BM25 直查库）")
     p.add_argument("--json", help="把结果写到该路径（JSON）")
     p.set_defaults(func=cmd_demo)
 
@@ -330,15 +439,27 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--times", type=int, default=2)
     p.set_defaults(func=cmd_replay)
 
-    p = sub.add_parser("explain", help="解释某一步的注入与剔除")
+    p = sub.add_parser("explain", help="解释某一步的注入与剔除（含 top-50 审计候选）")
     p.add_argument("--run", required=True, help="轨迹 JSON 路径")
-    p.add_argument("--step", type=int, default=1)
+    p.add_argument("--step", type=int, default=0, help="解释第几步（缺省解释全部并合并观察视图）")
+    p.add_argument("--audit", help="审计 JSONL 路径（缺省用轨迹 home 下的 audit.jsonl）")
     p.set_defaults(func=cmd_explain)
 
     p = sub.add_parser("memory", help="记忆管理")
     p.add_argument(
         "action",
-        choices=["list", "pending", "candidates", "delete", "forget", "update", "off", "on", "scopes"],
+        choices=[
+            "list",
+            "pending",
+            "candidates",
+            "review",
+            "delete",
+            "forget",
+            "update",
+            "off",
+            "on",
+            "scopes",
+        ],
     )
     p.add_argument("id", nargs="?", help="记忆 id（delete/forget/update 用）")
     p.add_argument("--content", help="新内容（update 用）")
@@ -348,11 +469,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--status")
     p.add_argument("--all-status", action="store_true", help="不过滤状态（含 superseded/archived）")
     p.add_argument("--include-shadow", action="store_true", help="含模型观察轨")
+    p.add_argument("--pending", action="store_true", help="review：未决确认块（含 TTL 剩余）")
+    p.add_argument("--suspicious", action="store_true", help="review：可疑项（安全标记/未决/TTL 冲突）")
     p.set_defaults(func=cmd_memory)
 
     p = sub.add_parser("learning", help="学习开关")
     p.add_argument("action", choices=["off", "on"])
     p.set_defaults(func=cmd_learning)
+
+    p = sub.add_parser("export", help="导出记忆库为目录包（manifest + memory.db）")
+    p.add_argument("target", help="导出目标目录")
+    p.set_defaults(func=cmd_export)
+
+    p = sub.add_parser("import", help="从目录包导入记忆库")
+    p.add_argument("source", help="导出包目录")
+    p.add_argument("--force", action="store_true", help="覆盖已存在的库（旧库留 .bak 副本）")
+    p.set_defaults(func=cmd_import)
     return parser
 
 

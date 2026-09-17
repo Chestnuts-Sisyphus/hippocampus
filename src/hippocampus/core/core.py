@@ -16,6 +16,7 @@
 from __future__ import annotations
 
 import json
+import os
 import sys
 import threading
 import uuid
@@ -42,6 +43,9 @@ from hippocampus.memory import retrieval as rt
 
 __all__ = ["MemoryCore", "MemoryCoreError", "WriterBusy"]
 
+# D4（A35）：pending 确认块默认 TTL（7 天）。超时未裁决 → 标记"未决冲突"，旧值保持生效。
+PENDING_TTL_MS = 7 * 24 * 3600 * 1000
+
 
 class MemoryCoreError(RuntimeError):
     """记忆核心的显式错误（scope 非法 / 库不可用等）。"""
@@ -56,6 +60,23 @@ def _as_scope(scope: Scope | None) -> Scope:
     return scope
 
 
+def _dir_writable(path: Path) -> bool:
+    """目录可写性探测（B5：chroma 不可写时 doctor 要能报出来）。
+
+    用真实写探针而不是 os.access：Windows 上 os.access 对目录的 W_OK
+    语义不可靠（只读属性不影响建文件），试写一发最接近 chroma 实际行为。
+    """
+    try:
+        if not path.exists():
+            path.mkdir(parents=True, exist_ok=True)
+        probe = path / f".wprobe_{os.getpid()}"
+        probe.write_text("ok", encoding="utf-8")
+        probe.unlink()
+        return True
+    except OSError:
+        return False
+
+
 class MemoryCore:
     """记忆核心：写入 / 检索 / 注入装配 / 确认 / 生命周期 / 可审计读取。"""
 
@@ -66,14 +87,20 @@ class MemoryCore:
         scope: Scope | None = None,
         timeout_s: float = DEFAULT_TIMEOUT_S,
         vector: bool = True,
+        backend: Any = None,
     ) -> None:
         """home：数据根（None = 环境变量 HIPPOCAMPUS_HOME / ~/.hippocampus）。
         scope：默认作用域（每个方法仍要求显式 scope，这里只决定预热的库）。
         vector：False 时不建向量集合（纯词法降级；CI 与无 chromadb 环境用）。
+        backend：存储后端（F5/A21）。None＝默认 `SqliteChromaBackend(vector=vector)`；
+        传入自定义后端（实现 `core/backend.py` 的 `MemoryBackend` 协议）即可替换存储。
         """
         self.home = Path(home).expanduser().resolve() if home else runtime.default_data_root()
         self.timeout_s = float(timeout_s)
         self.vector = bool(vector)
+        from hippocampus.core import backend as backend_mod
+
+        self.backend: Any = backend if backend is not None else backend_mod.SqliteChromaBackend(vector=self.vector)
         self._sessions: dict[str, mb.MemorySession] = {}
         self._locks: dict[str, WriterLock] = {}
         self._registry_guard = threading.RLock()
@@ -101,11 +128,9 @@ class MemoryCore:
             session = self._sessions.get(account)
             if session is None:
                 data_dir = self._data_dir(account)
-                if not self.vector:
-                    session = self._build_lexical_session(account, data_dir)
-                else:
-                    with runtime.using_data_root(self.home):
-                        session = mb.MemorySession(account, data_dir=data_dir)
+                # F5：会话由后端打开（默认 SqliteChromaBackend；换后端不改这里）
+                with runtime.using_data_root(self.home):
+                    session = self.backend.open_session(account, data_dir)
                 self._sessions[account] = session
                 self._restore_pending(session)
             return session
@@ -115,13 +140,18 @@ class MemoryCore:
 
         前身只在内存里排队，进程退出即丢；这里从 `pending_blocks` 表重建块
         （记忆内容按 id 现取；条目已不存在的直接跳过）。
+        D4（A35）：超过 TTL 的块**不恢复**进队列（视为已退休），由 `pending()`／
+        `pending_blocks()` 里的 `_expire_pending` 在写锁内落库标记"未决冲突"。
         """
         from hippocampus.memory import confirm as confirm_mod
 
         try:
             db.ensure_pending_schema(session.conn)
+            cutoff = db.now_ms() - PENDING_TTL_MS
             rows = session.conn.execute(
-                "SELECT id, entries, conflicts FROM pending_blocks WHERE resolved_at IS NULL ORDER BY created_at"
+                "SELECT id, entries, conflicts FROM pending_blocks "
+                "WHERE resolved_at IS NULL AND created_at >= ? ORDER BY created_at",
+                (cutoff,),
             ).fetchall()
         except Exception as e:
             sys.stderr.write(f"[core] 待确认恢复跳过（软失败）: {e}\n")
@@ -147,46 +177,6 @@ class MemoryCore:
         if len(session.pending_blocks) > 3:
             session.pending_blocks = session.pending_blocks[-3:]
             session.pending_block = session.pending_blocks[-1]
-
-    def _build_lexical_session(self, account: str, data_dir: Path) -> mb.MemorySession:
-        """无向量档：把 chroma 目录指向一个不存在的路径并关掉语义通道。
-
-        做法是构造 MemorySession 但把 `collections` 置空（检索侧的语义通道对
-        空集合天然返回空），避免在没有 chromadb 的环境里也要求安装它。
-        """
-        data_dir.mkdir(parents=True, exist_ok=True)
-        session = mb.MemorySession.__new__(mb.MemorySession)
-        import sqlite3
-
-        session.account_id = account
-        session.data_dir = data_dir
-        session.db_path = data_dir / "memory.db"
-        session.chroma_dir = data_dir / "chroma"
-        session.lock = threading.RLock()
-        conn = sqlite3.connect(str(session.db_path), check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.executescript(db.SCHEMA)
-        db.ensure_b2_schema(conn)
-        db.seed_initial_snapshot(conn)
-        db.ensure_event_time_param(conn)
-        db.ensure_retrieval_params(conn)
-        db.ensure_injection_params(conn)
-        db.ensure_learning_params(conn)
-        db.ensure_security_schema(conn)
-        session.conn = conn
-        session.collections = {"mem": None, "ep": None}
-        session.collection = None
-        session.idx = rt.build_bm25(conn)
-        session.pending_block = None
-        session.pending_blocks = []
-        session._pending_alarm = None
-        session._last_lifecycle_scan_ms = 0
-        session._LIFECYCLE_SCAN_INTERVAL_MS = 24 * 3600 * 1000
-        session._last_maintenance_scan_ms = 0
-        session._MAINTENANCE_SCAN_INTERVAL_MS = 24 * 3600 * 1000
-        session._episode_by_text = {}
-        session._EP_CACHE_MAX = 20
-        return session
 
     # ------------------------------------------------------------------
     # v1 冻结接口
@@ -385,11 +375,17 @@ class MemoryCore:
         embeddings_queue 里的行进删掉，而刚 upsert 的行可能还没落进索引——实测这样做
         会让"刚写的记忆检索不到"（demo 从 10/10 掉到 7/10）。WAL 的排空留在会话初始化
         时做（前身的位置），那里面对的是**别的进程**写下的积压。
+
+        B5：同步失败不再只留一行 stderr——把原因记在会话的 `_index_error` 上，
+        后续 `inject_finalize` 会把它带进注入结果（告警而非静默空注入），
+        `doctor` 的索引健康行也会读到它。
         """
         try:
             rt.sync_index(session.conn, session.collections)
             session.idx = rt.build_bm25(session.conn)
+            session._index_error = ""
         except Exception as e:
+            session._index_error = f"索引同步失败: {e}"
             sys.stderr.write(f"[core] 索引同步失败（软失败）: {e}\n")
 
     def search(
@@ -498,7 +494,66 @@ class MemoryCore:
                 )
             )
             injection.injected_ids.append(mem["id"])
+        # B5：索引同步/检索异常时明确告警（不再静默空注入）——调用方（代理/Agent 形态）
+        # 把 note 拼进响应即可让用户看到"记忆可能不完整"，而不是以为没记忆。
+        index_err = getattr(session, "_index_error", "")
+        if index_err:
+            injection.note = f"（索引告警：{index_err}——本轮记忆注入可能不完整）"
+        # A18（D1）：旁路审计通道——top-N=50 候选全集，供 explain 回答"那条为什么没进"
+        # （旧版 explain 只看到检索 top-k 的被剔候选）。旁路：失败只记 stderr。
+        self._audit_retrieval(session, scope, query, injection, flow)
         return injection
+
+    def _audit_retrieval(
+        self, session: mb.MemorySession, scope: Scope, query: str, injection: Injection, flow: str
+    ) -> None:
+        """旁路审计（AuditSink，A18/D1）：对同一 query 做一次 top-N=50 检索并落盘。
+
+        与正常注入链（top-k≈8）分离：正常链决定"注入了什么"，审计链记录
+        "本来还有哪些候选、为什么没进"。开关读活跃快照 `audit_enabled`。
+        """
+        AUDIT_TOP_N = 50  # noqa: N806 - A18 口径：候选全集上限
+        try:
+            from hippocampus.memory import audit
+
+            params = rt.get_active_params(session.conn)
+            if not params.get("audit_enabled", True):
+                return
+            raw = rt.retrieve(
+                session.conn,
+                query,
+                session.collections,
+                session.idx,
+                top_k=AUDIT_TOP_N,
+                session_id=f"session_{scope.session}",
+                flow=flow,
+            )
+            injected_set = set(injection.injected_ids)
+            candidates = []
+            for row in raw.get("results", []):
+                d = dict(row)
+                doc_id = str(d.get("doc_id") or "")
+                reason = ""
+                if d.get("kind") == "memory":
+                    mem = self._load_memory(session, doc_id)
+                    if mem is None:
+                        reason = "记忆不存在"
+                    else:
+                        reason = self._exclusion_reason(mem) or ""
+                candidates.append(
+                    {
+                        "doc_id": doc_id,
+                        "kind": d.get("kind"),
+                        "channel": str(d.get("channel") or ""),
+                        "score": round(float(d.get("score") or 0.0), 4),
+                        "injected": doc_id in injected_set,
+                        "dropped": bool(reason),
+                        "reason": reason,
+                    }
+                )
+            audit.record_retrieval(scope.account, query=query, candidates=candidates, injected_ids=injection.injected_ids)
+        except Exception as e:
+            sys.stderr.write(f"[core] 旁路审计失败（不中断）: {e}\n")
 
     def consolidate(
         self,
@@ -541,9 +596,45 @@ class MemoryCore:
                 block_text = mb.after_response(session, user_text or "（无用户轮）", [])
                 if block_text:
                     turn.confirm_block = (turn.confirm_block + block_text).strip()
+            # 轮末守卫（前身口径，B1/B2/B3）：漏抽补实体 + 实体消歧。
+            # 放在最后一次 reindex 之前，让索引收尾带上守卫的改动。
+            self._run_turn_guards(scope, session, user_text)
             self._reindex(session)
             turn.pending = len(session.pending_blocks)
         return turn
+
+    def _run_turn_guards(self, scope: Scope, session: mb.MemorySession, user_text: str) -> None:
+        """轮末守卫：漏抽检测（孤立经历补实体 + 语义命中但实体未命中补实体）＋实体消歧第二层。
+
+        - `missed_extract.scan_and_fix`：孤立经历（entity_ids 为空）补实体，≤3 次；
+        - `retrieval_guard.run_retrieval_guard`：语义通道命中但实体未命中的经历补实体（只加不删）；
+        - `disambiguate.run_disambiguation`：实体两两消歧合并（无模型端点时软失败跳过）。
+
+        全部软失败：守卫坏掉只记 stderr，**绝不阻断本轮固化结果**（A28 的"漏抽守卫"口径）。
+        """
+        if not user_text or not user_text.strip():
+            return
+        try:
+            raw = rt.retrieve(
+                session.conn,
+                user_text,
+                session.collections,
+                session.idx,
+                top_k=8,
+                session_id=f"session_{scope.session}",
+                flow="user",
+            )
+            channels = raw.get("channels") or {}
+            from hippocampus.memory import disambiguate, missed_extract, retrieval_guard
+
+            retrieval_guard.run_retrieval_guard(
+                session.conn, channels.get("entity_ids") or [], channels, verbose=False
+            )
+            missed_extract.scan_and_fix(session.conn, verbose=False, max_episodes=20)
+            disambiguate.run_disambiguation(session.conn, max_pairs=5)
+            session.conn.commit()
+        except Exception as e:
+            sys.stderr.write(f"[core] 轮末守卫失败（软失败，不阻断固化）: {e}\n")
 
     def _rule_conflicts_after_write(self, session: mb.MemorySession, new_ids: list[str]) -> str:
         """对话写入之后做一次规则冲突检测：命中就把新条挂起并返回确认块文本。
@@ -713,22 +804,153 @@ class MemoryCore:
     # ------------------------------------------------------------------
 
     def pending(self, scope: Scope) -> list[dict[str, Any]]:
-        """未决确认队列（块 → 编号 → 记忆）。"""
+        """未决确认队列（块 → 编号 → 记忆）。先清一遍 TTL 过期块（旧值保持生效）。"""
         scope = _as_scope(scope)
         session = self._session(scope)
         out: list[dict[str, Any]] = []
-        for block in list(session.pending_blocks):
-            for entry in block.entries:
+        with self._lock(scope.account).held(), session.lock:
+            self._expire_pending(session)
+            for block in list(session.pending_blocks):
+                for entry in block.entries:
+                    out.append(
+                        {
+                            "num": entry["num"],
+                            "id": entry["mem"]["id"],
+                            "kind": entry["mem"].get("type", ""),
+                            "content": entry["mem"].get("content", ""),
+                            "is_new": entry["is_new"],
+                        }
+                    )
+        return out
+
+    def pending_blocks(self, scope: Scope) -> list[dict[str, Any]]:
+        """未决确认块（块级视图，含 TTL 剩余；`memory review --pending` 用）。
+
+        返回每块的 block_id／created_at／TTL 剩余（ms）／条目列表。
+        """
+        scope = _as_scope(scope)
+        session = self._session(scope)
+        with self._lock(scope.account).held(), session.lock:
+            self._expire_pending(session)
+            now = db.now_ms()
+            out: list[dict[str, Any]] = []
+            for block in list(session.pending_blocks):
+                block_id = getattr(block, "block_id", "")
+                created_at = 0
+                if block_id:
+                    row = session.conn.execute(
+                        "SELECT created_at FROM pending_blocks WHERE id=?", (block_id,)
+                    ).fetchone()
+                    if row:
+                        created_at = int(row["created_at"] or 0)
+                ttl_remaining = max(0, PENDING_TTL_MS - (now - created_at))
                 out.append(
                     {
-                        "num": entry["num"],
-                        "id": entry["mem"]["id"],
-                        "kind": entry["mem"].get("type", ""),
-                        "content": entry["mem"].get("content", ""),
-                        "is_new": entry["is_new"],
+                        "block_id": block_id,
+                        "created_at": created_at,
+                        "ttl_ms": PENDING_TTL_MS,
+                        "ttl_remaining_ms": ttl_remaining,
+                        "entries": [
+                            {
+                                "num": e["num"],
+                                "id": e["mem"]["id"],
+                                "kind": e["mem"].get("type", ""),
+                                "content": e["mem"].get("content", ""),
+                                "is_new": e["is_new"],
+                            }
+                            for e in block.entries
+                        ],
                     }
                 )
-        return out
+            return out
+
+    def _expire_pending(self, session: mb.MemorySession, ttl_ms: int = PENDING_TTL_MS) -> list[str]:
+        """TTL 过期处置（D4/A35）：未决确认块超时未裁决 → 标记已决＋记录"未决冲突"。
+
+        - **旧值保持生效**：旧记忆本来就是 active（候选不注入），无需改动；
+        - 新候选保持 candidate（不注入、不消失，可追溯）；
+        - 块级 `reason` 追加"TTL 未决冲突"，`resolved_at` 落库——之后不再出现在
+          pending 队列，也不会被误恢复。
+        返回被标记的块 id 列表。软失败不阻断。
+        """
+        try:
+            db.ensure_pending_schema(session.conn)
+            cutoff = db.now_ms() - int(ttl_ms)
+            rows = session.conn.execute(
+                "SELECT id FROM pending_blocks WHERE resolved_at IS NULL AND created_at < ?", (cutoff,)
+            ).fetchall()
+            ids = [r["id"] for r in rows]
+            if not ids:
+                return []
+            session.conn.execute(
+                "UPDATE pending_blocks SET resolved_at=?, reason=reason || '（TTL 未决冲突："
+                "超时未裁决，旧值保持生效）' WHERE resolved_at IS NULL AND created_at < ?",
+                (db.now_ms(), cutoff),
+            )
+            # 从内存队列移除过期块（进程内长时间运行也会过期）
+            if session.pending_blocks:
+                expired = set(ids)
+                session.pending_blocks = [
+                    b for b in session.pending_blocks if getattr(b, "block_id", "") not in expired
+                ]
+                session.pending_block = session.pending_blocks[-1] if session.pending_blocks else None
+            session.conn.commit()
+            return ids
+        except Exception as e:
+            sys.stderr.write(f"[core] pending TTL 清理失败（软失败）: {e}\n")
+            return []
+
+    def suspicious(self, scope: Scope) -> list[dict[str, Any]]:
+        """可疑项审计（`memory review --suspicious`，A34/D3）。
+
+        三类可疑：① 带安全标记的记忆（security_flag>0）；② 长期未决的候选
+        （含 TTL 未决冲突）；③ 生命周期异常（非 active/dormant/archived）。
+        """
+        scope = _as_scope(scope)
+        session = self._session(scope)
+        with self._lock(scope.account).held(), session.lock:
+            self._expire_pending(session)
+            out: list[dict[str, Any]] = []
+            rows = session.conn.execute(
+                "SELECT id, type, content, status, lifecycle, security_flag, created_at "
+                "FROM memories WHERE security_flag > 0 OR status='candidate' "
+                "OR lifecycle NOT IN ('active','dormant','archived') ORDER BY created_at LIMIT 200"
+            ).fetchall()
+            for r in rows:
+                flags = []
+                if (r["security_flag"] or 0) > 0:
+                    flags.append(f"安全标记 {r['security_flag']}")
+                if r["status"] == "candidate":
+                    flags.append("待确认候选（未生效）")
+                if r["lifecycle"] not in ("active", "dormant", "archived"):
+                    flags.append(f"生命周期 {r['lifecycle']}")
+                out.append(
+                    {
+                        "id": r["id"],
+                        "kind": r["type"],
+                        "content": r["content"],
+                        "status": r["status"],
+                        "lifecycle": r["lifecycle"],
+                        "flags": flags,
+                    }
+                )
+            # TTL 未决冲突的块（已退休但从未裁决）
+            blocks = session.conn.execute(
+                "SELECT id, reason, created_at, resolved_at FROM pending_blocks "
+                "WHERE resolved_at IS NOT NULL AND reason LIKE '%TTL 未决冲突%' ORDER BY resolved_at DESC LIMIT 50"
+            ).fetchall()
+            for b in blocks:
+                out.append(
+                    {
+                        "id": b["id"],
+                        "kind": "pending-block",
+                        "content": f"TTL 未决冲突（创建 {b['created_at']}，标记 {b['resolved_at']}）",
+                        "status": "ttl-unresolved",
+                        "lifecycle": "-",
+                        "flags": ["TTL 未决冲突：旧值保持生效"],
+                    }
+                )
+            return out
 
     def stats(self, scope: Scope) -> dict[str, int]:
         """库内计数（实体/记忆/经历/关系/待确认/候选）。"""
@@ -835,11 +1057,16 @@ class MemoryCore:
     # ------------------------------------------------------------------
 
     def close(self) -> None:
-        """关闭所有会话连接（不删数据）。"""
+        """关闭所有会话连接（不删数据）。
+
+        用 `MemorySession.close()`（conn＋chroma client 一起关）而不是只关 sqlite：
+        只关 conn 会让 chroma PersistentClient 的句柄积累到 GC，全量测试跑几百个
+        core 实例后触发 "Too many open files"（实测 test_t6 真实服务器测试被拖垮）。
+        """
         with self._registry_guard:
             for session in self._sessions.values():
                 try:
-                    session.conn.close()
+                    session.close()
                 except Exception:
                     pass
             self._sessions.clear()
@@ -862,3 +1089,44 @@ class MemoryCore:
         else:
             tier, needs_download = "chromadb 内置档", True
         return {"model": model, "tier": tier, "needs_download": needs_download, "enabled": cfg["enabled"]}
+
+    def index_health(self, scope: Scope) -> dict[str, Any]:
+        """索引健康（doctor 用，B5）：chroma 可写性＋集合条数 vs 库内 active 条数＋同步错误。
+
+        词法档（未建向量集合）返回 `collection_count=None`，健康结论记"不适用"——
+        词法档的 BM25 索引随写重建，不存在 chroma 那套一致性风险。
+        """
+        scope = _as_scope(scope)
+        session = self._session(scope)
+        active = session.conn.execute(
+            "SELECT COUNT(*) FROM memories WHERE status='active' AND COALESCE(shadow,0)=0"
+        ).fetchone()[0]
+        mem_col = (session.collections or {}).get("mem")
+        if mem_col is None:
+            col_count: Any = None
+        else:
+            try:
+                col_count = int(mem_col.count())
+            except Exception as e:
+                col_count = f"读取失败: {e}"
+        writable = True
+        if mem_col is not None:
+            writable = _dir_writable(session.chroma_dir)
+        try:
+            queue = int(rt.embeddings_queue_depth(session.chroma_dir))
+        except Exception:
+            queue = -1
+        last_error = str(getattr(session, "_index_error", "") or "")
+        if mem_col is None:
+            healthy: Any = None  # 不适用（词法档）
+        else:
+            healthy = bool(writable and isinstance(col_count, int) and not last_error)
+        return {
+            "active_memories": active,
+            "collection_count": col_count,
+            "chroma_dir": str(session.chroma_dir),
+            "chroma_writable": writable,
+            "embeddings_queue": queue,
+            "last_error": last_error,
+            "healthy": healthy,
+        }

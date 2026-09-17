@@ -163,6 +163,8 @@ class MemorySession:
             self._MAINTENANCE_SCAN_INTERVAL_MS = 24 * 3600 * 1000
             self._episode_by_text = {}
             self._EP_CACHE_MAX = 20
+            # [HIPPO] B5：索引健康追踪（写失败/检索失败记在这里，doctor 与注入告警读它）
+            self._index_error = ""
             return
 
         self._client = chromadb.PersistentClient(path=str(self.chroma_dir))
@@ -205,6 +207,9 @@ class MemorySession:
             fb.seed_default_params(self.conn)
         except Exception as e:
             sys.stderr.write(f"[memory] seed_default_params 失败（不中断）: {e}\n")
+
+        # [HIPPO] B5：索引健康追踪（写失败/检索失败记在这里，doctor 与注入告警读它）
+        self._index_error = ""
 
         # 发现 31：跨进程写入的 embeddings_queue 不会通知本进程 PersistentClient
         try:
@@ -288,6 +293,14 @@ class MemorySession:
             out["compact"] = schema_compact.compact_schemas(self.conn, collections=self.collections, now=now)
         except Exception as e:
             sys.stderr.write(f"[memory] 图式化调度失败（不中断）: {e}\n")
+        # [HIPPO] B4：mega-hub 标记进维护扫描（前身只有单测没有调度点）。
+        # ABOUT 数 > 阈值的实体标 is_hub=1 + 出分流建议；只标记不删改；软失败不中断。
+        try:
+            from hippocampus.memory import hub_guard
+
+            out["hubs"] = hub_guard.scan_hubs(self.conn, verbose=False)
+        except Exception as e:
+            sys.stderr.write(f"[memory] mega-hub 扫描失败（不中断）: {e}\n")
         self._last_maintenance_scan_ms = now
         return out
 
@@ -853,6 +866,11 @@ def prepare_injection(
 
             return stable_text, fluid_text, filtered
     except Exception as e:
+        # [HIPPO] B5：检索/注入失败记入会话（doctor 与下一轮注入告警能读到，不再静默空注入）
+        try:
+            session._index_error = f"检索/注入失败: {e}"
+        except Exception:
+            pass
         sys.stderr.write(f"[memory] 记忆检索失败（软失败，不注入）: {e}\n")
         return "", "", []
 

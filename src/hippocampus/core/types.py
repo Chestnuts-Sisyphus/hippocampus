@@ -99,6 +99,8 @@ class Injection:
     injected_ids: list[str] = field(default_factory=list)
     flow: str = "user"
     enabled: bool = True
+    # 注入旁路说明（索引异常告警等；v1 追加字段，默认空串不破坏既有调用方）
+    note: str = ""
 
     @property
     def text(self) -> str:

@@ -279,6 +279,8 @@ INJECTION_PARAM_DEFAULTS = {
     "fluid_flow_max": 3,
     # 任务书 3B（缓存侧）新参数：cache_control 透传开关
     "cache_control_passthrough": True,
+    # A18（D1）：旁路审计通道开关（top-N=50 候选全集，供 explain 复盘"那条为什么没进"）
+    "audit_enabled": True,
 }
 
 
