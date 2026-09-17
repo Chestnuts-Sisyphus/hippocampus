@@ -1,0 +1,38 @@
+# GitHub 成果同步纪律（F1/F2 · 2026-09-18 起强制执行）
+
+> 用户 09-18 指令："对于 github 各项内容的同步成果更新甚至重写是非常有必要的"。
+> 本文件把"线上不能落后于本地"变成**每次交付的固定动作清单**，照单执行即可。
+
+## 一、每次交付的固定动作（有代码/数字/文档变更就做，全部做完才算交付）
+
+1. **推送 main**：本地分组提交后立即推，不等攒批。
+   推送命令（凭据零字面量，走 GIT_ASKPASS 垫片）：
+   ```bash
+   GIT_ASKPASS='D:/tmp/git-askpass-gh.sh' GIT_TERMINAL_PROMPT=0 git -c credential.helper= push origin main
+   ```
+   （垫片如被 D:/tmp 清理需重建：user=x-access-token，pass=KEY/GITHUB-TOKENS.txt 第 11 行。）
+2. **数字变更时**：同源更新 README 官方分/性能表 ← 结果文档 v（数字正本）＋ `docs/benchmark.md`／
+   `docs/roadmap.md`。**数字只在一处定稿（结果文档），其余文件引用并照抄最新值**；改完自查：README 里
+   每个数字都能在结果文档找到同值。检查命令：`grep -nE "70\.5|32\.55|632\.8|41\.98|63\.65" README.md`
+   与结果文档逐值核对。
+3. **按需 tag + Release**（英文 notes，含两个官方分与口径三件套）：每个 tag 前本地全量
+   `pytest --basetemp=D:/tmp/pt` 全绿；Release notes = 做了什么 / 数字（带 CI+口径） / 安全 seal。
+4. **description/topics 复核**：仓库名、description、topics 是否与本期成果一致（README 顶部
+   对齐 GitTok/Infinigrow 包装时一并检查）。
+5. **数字正本可复跑**：结果文档里的每个新数字必须带复跑命令（`D:/AI/求职-天津秋招-202609/投递/
+   Hippocampus-基准评测结果-20260917.md` 是本地数字正本，仓库侧 `docs/benchmark.md` 是协议正本）。
+
+## 二、同源机制（F2，防两处手写漂移）
+
+- **唯一事实源**：`投递/Hippocampus-基准评测结果-*.md`（本地，数字正本）。README 表、结果文档表、
+  会话沉淀三处**必须同值**；任何一处改了数字，另外两处同步改。
+- **官方分口径三件套**（CI/判分模型与 temp/输入＝top-8 注入非全文）在 README 与结果文档各带一份，
+  引用时互相指认，不另起炉灶。
+- 联动检查：每轮交付把 `grep` 到的 README 数字清单附在回写区，防"只改了结果文档忘了 README"。
+
+## 三、本轮（2026-09-18 五轮收口）已同步项
+
+- T6 增量 upsert：README 写入行 632.8 ms → **41.98 ms**（1154 记忆规模实测，结果文档 §三 同值）。
+- T7 ±1 轮邻居：LoCoMo 全量证据命中 45.7% → **63.65%**（`--neighbors`，tokens 1354→1767）；
+  官方联动批次结果见结果文档 §二·五（若达决策门，README 表格行同步）。
+- T5 LRU：LME 神经档 200 账户峰值常驻内存 **~4GB → 实测值见结果文档 §九 E7 回填**，证据命中仍 ≥98%。
