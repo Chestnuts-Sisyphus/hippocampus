@@ -16,7 +16,6 @@ import pytest
 
 from hippocampus.core import Scope
 from hippocampus.memory import audit as audit_mod
-from hippocampus.memory import database as db
 
 
 @pytest.fixture()

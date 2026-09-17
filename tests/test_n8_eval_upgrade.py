@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import pytest
 
-from hippocampus.core import MemoryCore, Scope
+from hippocampus.core import Scope
 from hippocampus.eval.questions import QUESTIONS, questions_for
 
 

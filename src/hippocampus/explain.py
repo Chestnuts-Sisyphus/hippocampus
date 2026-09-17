@@ -16,7 +16,6 @@ v2 形态（A18 完整版，缺口清单 D1/D2）：
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 from typing import Any
 

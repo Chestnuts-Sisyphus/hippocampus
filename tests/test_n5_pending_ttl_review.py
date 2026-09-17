@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from hippocampus.core import MemoryCore, Scope
+from hippocampus.core import Scope
 from hippocampus.core.core import PENDING_TTL_MS
 from hippocampus.memory import database as db
 

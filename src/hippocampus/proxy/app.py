@@ -343,6 +343,7 @@ def make_upstream():
     def _upstream(payload: dict, *, model: str, endpoint: str, stream: bool = False, body: dict | None = None):
         from hippocampus.net import validate_endpoint_url
         from hippocampus.proxy.llm_proxy import build_headers, build_upstream_url, stream_upstream
+        from hippocampus.settings import llm_post_json
 
         cfg = mem_config.llm_config()
         if stream:

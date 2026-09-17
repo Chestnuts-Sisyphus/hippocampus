@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import json
 
-import pytest
 from fastapi.testclient import TestClient
 
 from hippocampus.proxy.app import build_app
@@ -96,7 +95,7 @@ def _responses_upstream(deltas: list[str]):
 def _collect_chat_lines(client: TestClient, path: str, body: dict, headers: dict | None = None) -> list[str]:
     with client.stream("POST", path, json=body, headers=headers or {}) as resp:
         assert resp.status_code == 200
-        return [l for l in resp.iter_lines() if l.strip()]
+        return [ln for ln in resp.iter_lines() if ln.strip()]
 
 
 def test_streaming_chat_line_by_line(core, scope):
@@ -110,10 +109,10 @@ def test_streaming_chat_line_by_line(core, scope):
             {"model": "m", "stream": True, "messages": [{"role": "user", "content": "打个招呼"}]},
             headers={"X-Hippocampus-Account": scope.account},
         )
-    data_lines = [l for l in lines if l.startswith("data:") and "[DONE]" not in l]
+    data_lines = [ln for ln in lines if ln.startswith("data:") and "[DONE]" not in ln]
     contents = []
-    for l in data_lines:
-        obj = json.loads(l[5:])
+    for ln in data_lines:
+        obj = json.loads(ln[5:])
         delta = (obj.get("choices") or [{}])[0].get("delta") or {}
         if delta.get("content"):
             contents.append(delta["content"])
@@ -135,13 +134,13 @@ def test_streaming_anthropic_line_by_line(core, scope, monkeypatch):
                   "messages": [{"role": "user", "content": "打个招呼"}]},
         ) as resp:
             assert resp.status_code == 200
-            lines = [l for l in resp.iter_lines() if l.strip()]
-    deltas = [l for l in lines if l.startswith("event: content_block_delta")]
+            lines = [ln for ln in resp.iter_lines() if ln.strip()]
+    deltas = [ln for ln in lines if ln.startswith("event: content_block_delta")]
     assert len(deltas) == 2, f"应有两个 content_block_delta 事件，实际 {len(deltas)}"
     texts = []
-    for l in lines:
-        if l.startswith("data:") and "content_block_delta" in l:
-            texts.append(json.loads(l[5:])["delta"]["text"])
+    for ln in lines:
+        if ln.startswith("data:") and "content_block_delta" in ln:
+            texts.append(json.loads(ln[5:])["delta"]["text"])
     assert texts == ["你", "好"]
 
 
@@ -157,8 +156,8 @@ def test_streaming_responses_line_by_line(core, scope, monkeypatch):
             json={"model": "m", "instructions": "你是助手", "stream": True, "input": "打个招呼"},
         ) as resp:
             assert resp.status_code == 200
-            lines = [l for l in resp.iter_lines() if l.strip()]
-    delta_events = [l for l in lines if l.startswith("event: response.output_text.delta")]
+            lines = [ln for ln in resp.iter_lines() if ln.strip()]
+    delta_events = [ln for ln in lines if ln.startswith("event: response.output_text.delta")]
     assert len(delta_events) == 2, f"应有两个 output_text.delta 事件，实际 {len(delta_events)}"
 
 
@@ -196,5 +195,5 @@ def test_streaming_confirm_block_as_tail_delta(core, scope):
     tail = "".join(lines)
     assert "记忆·确认" in tail, "冲突时确认块应作为末尾 delta 追加"
     # 确认块确实在数据流里（被发给了客户端）
-    data_parts = [l for l in lines if l.startswith("data:") and "记忆·确认" in l]
+    data_parts = [ln for ln in lines if ln.startswith("data:") and "记忆·确认" in ln]
     assert data_parts, "确认块文本应出现在 data 事件里"

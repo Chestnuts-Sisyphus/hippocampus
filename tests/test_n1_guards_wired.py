@@ -83,7 +83,6 @@ def test_missed_extract_backfill_orphan_on_consolidate(core, scope, monkeypatch)
 
 def test_guard_failure_does_not_block_consolidate(core, scope, monkeypatch):
     """守卫失败路径软失败：consolidate 照常返回、写入照常生效。"""
-    session = _session(core, scope)
 
     def exploding_retrieve(*_a, **_k):
         raise RuntimeError("索引损坏（测试构造）")

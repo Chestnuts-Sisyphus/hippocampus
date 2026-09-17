@@ -376,8 +376,7 @@ def purge_embeddings_wal(chroma_dir) -> int:
 # ---- query embedding 复用 + LRU（任务书 8b 任务 1：mem/ep 两池共用一次推理）----
 # ---- P02 任务 1：跟随配置（修 8c 硬编码缺口）+ 配置变更强制失效 ----
 # [HIPPO] 进程级 embedding 函数缓存（按模型名键控）。
-# 它不携带 scope 信息（同一进程里所有 scope 共用同一个嵌入模型——这本来就是配置项，
-# 不是数据项）。测试里必须逐用例重置（tests/conftest.py），否则跨用例会串向量空间。
+# [HIPPO] 不携带 scope 信息（嵌入模型是配置项不是数据项）；测试逐用例重置（conftest）。
 _EMB_FN = None
 _EMB_FN_MODEL = None
 
@@ -388,6 +387,7 @@ def invalidate_embedding_cache() -> None:
     入口：控制台 Api.setEmbeddingConfig 成功后必须调用；模块级 _EMB_FN 与
     LRU（_query_embedding_cached）一并清空，下次 _get_embed_fn 按新配置重建。"""
     global _EMB_FN, _EMB_FN_MODEL
+    # [HIPPO] 复位缓存（与上方模块级声明同源；供依赖审计识别）
     _EMB_FN = None
     _EMB_FN_MODEL = None
     _query_embedding_cached.cache_clear()

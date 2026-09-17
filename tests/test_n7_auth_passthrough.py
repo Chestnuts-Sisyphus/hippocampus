@@ -15,7 +15,7 @@ import secrets
 import pytest
 from fastapi.testclient import TestClient
 
-from hippocampus.core import MemoryCore, Scope
+from hippocampus.core import Scope
 from hippocampus.memory import config as mem_config
 from hippocampus.proxy.app import UpstreamHTTPError, build_app
 
@@ -88,6 +88,44 @@ def test_401_token_from_store(core, home, scope):
             json={"model": "m", "messages": [{"role": "user", "content": "你好"}]},
         )
         assert r2.status_code == 200
+
+
+def test_make_upstream_nonstream_path_uses_llm_post_json(core, scope, monkeypatch):
+    """`make_upstream` 非流式路径真的走 `llm_post_json`（此前该名未导入——NameError 漏网）。"""
+    import hippocampus.settings as settings
+    from hippocampus.proxy.app import make_upstream
+
+    captured: dict = {}
+
+    def fake_post(payload, *, endpoint, timeout_s=None):
+        captured["endpoint"] = endpoint
+        captured["payload"] = payload
+        return 200, {
+            "choices": [{"message": {"role": "assistant", "content": "上游回复"}}],
+            "usage": {"prompt_tokens": 1, "completion_tokens": 2},
+        }
+
+    monkeypatch.setattr(settings, "llm_post_json", fake_post)
+    upstream = make_upstream()
+    body, usage = upstream({"model": "m", "messages": []}, model="m", endpoint="chat", stream=False, body=None)
+    assert captured["endpoint"] == "chat"
+    assert body["choices"][0]["message"]["content"] == "上游回复"
+    assert usage["completion_tokens"] == 2
+
+
+def test_make_upstream_nonstream_passthrough_on_error(core, scope, monkeypatch):
+    """非流式路径：上游非 2xx → 抛 UpstreamHTTPError（带状态码与错误体）。"""
+    import hippocampus.settings as settings
+    from hippocampus.proxy.app import make_upstream
+
+    monkeypatch.setattr(
+        settings, "llm_post_json", lambda payload, *, endpoint, timeout_s=None: (429, {"error": {"message": "限流"}})
+    )
+    upstream = make_upstream()
+    with pytest.raises(UpstreamHTTPError) as ei:
+        upstream({"model": "m"}, model="m", endpoint="chat", stream=False, body=None)
+    assert ei.value.status_code == 429
+    assert ei.value.body["error"]["message"] == "限流"
 
 
 def test_upstream_error_passthrough_nonstream(core, scope):
