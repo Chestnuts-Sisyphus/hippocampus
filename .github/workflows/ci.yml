@@ -49,11 +49,22 @@ jobs:
       - name: 凭据扫描（零命中）
         run: python scripts/scan_credentials.py
 
-      - name: 离线冒烟：doctor → seed → demo（无 key / 无网）
+      - name: 形态路径必须真跑（不允许静默跳过）
+        # 装了 proxy extra（uvicorn/fastapi/httpx）这三类路径才可能跑：真服务器三格式、
+        # 真流式、实例令牌鉴权、带 tools 的三向端到端。先断言能力在，再跑这些文件——
+        # 这样"CI 里其实是 skip"这种假绿不会出现（F6）。
+        run: |
+          python -c "import uvicorn, fastapi, httpx; print('proxy extra ready')"
+          python -m pytest tests/test_t6_real_server.py tests/test_n6_streaming.py tests/test_n7_auth_passthrough.py tests/test_n15_proxy_tools.py -q
+
+      - name: 离线冒烟：doctor → seed → demo ＋ **阈值断言**（分数回归会被 CI 抓到）
+        # 阈值口径：记忆开 ≥ 9/10、记忆关 ≤ 6/10（本机实测 10/10 与 3/10，留余量防脆）。
+        # 分数只降不升说明记忆层退化——这条断言就是"回归红线"（N17-C2）。
         run: |
           hippocampus doctor
           hippocampus --account ci seed
-          hippocampus --account ci demo --questions 10 --memories
+          hippocampus --account ci demo --questions 10 --memories --json demo.json
+          python -c "import json,sys; d=json.load(open('demo.json',encoding='utf-8')); a={x['name']:x for x in d['arms']}; on=a['记忆开']['passed']; off=a['记忆关']['passed']; print('记忆开',on,'/10  记忆关',off,'/10'); sys.exit('阈值断言失败：记忆开 %s<9 或 记忆关 %s>6' % (on,off)) if (on<9 or off>6) else print('阈值断言通过')"
 
       - name: 示例库扫描（无个人数据、无真实记忆）
         run: python scripts/scan_personal_data.py --home "${{ env.HIPPOCAMPUS_HOME }}/accounts/ci"

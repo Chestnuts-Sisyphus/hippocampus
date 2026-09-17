@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 #      写它会让 `pip install hippocampus` 装到第三方的东西（见 docs/naming.md 实测）；
 #   ② 分发名只在 `pip install` / `pip show` 出现，不影响项目名与命令行。
 name = "hippocampus-agent"
-version = "0.2.0"
+version = "0.2.1"
 description = "以记忆为核心的 agent 运行时：记忆核心 + 代理形态 + Agent 形态"
 readme = "README.md"
 requires-python = ">=3.11"

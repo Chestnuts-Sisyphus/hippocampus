@@ -3,6 +3,54 @@
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)；
 `MemoryCore` 接口自 v1 起**只允许追加字段**（见 `docs/memory-core-v1.md`）。
 
+## [0.2.1] — 2026-09-17
+
+第三个版本：**二轮缺口清单 N11–N20**。主题＝"承诺与实现对齐"——把正本新口径落到实现与文档，
+把两条稳定性长尾（hnsw 索引读失败、A30-3 间歇失败）修到根上，并给评测补齐公开基准与压测。
+**接口仍为 v1（只追加：`TurnResult.observed_ids`、`MemoryCore.ingest_history/active_params/rebuild_index`）。**
+
+### 修复
+
+- **向量索引间歇读失败（`Error creating hnsw segment reader: Nothing found on disk`）**：
+  根因＝会话初始化时手工 `DELETE FROM chroma.embeddings_queue`（改内部表，会把"还没被
+  compactor 落进段"的写入一起抹掉）＋ 段 reader 建不起来时只重试不修。现改为：只写配置
+  （`automatically_purge`，回收交给 chroma）、打开会话**预热探测**、读失败→**从 memory.db
+  重建向量池**（实测：重试与再 upsert 都无效，重建有效）、新增 `hippocampus index rebuild`。
+  这同时消掉了 `test_a30_3`（约 1/6 概率）的间歇失败——它的失败原文就是语义通道读失败。
+- **Agent 形态漏执行用户意图**：检索无命中时直接收口，`记住 X`／`列出偏好`／`写成文件`
+  什么都不做还报 `completed`（假完成）；现检索后一律回 think 执行意图动作，检索类答复如实
+  报命中条数（空命中按"没依据"走三出口）。
+- **观察轨在生产路径上没有调用点**：`extract_response`（模型输出→`shadow=1`）只有随迁测试在调；
+  现接进 `consolidate` 的 `assistant_text` 分支（两形态共用），`TurnResult.observed_ids` 留证。
+
+### 新增
+
+- **Agent 形态不阉割**（正本 §一）：agent 轮末走 `consolidate`（对话固化＋守卫＋确认块）、
+  `think` 轮首消费 `confirm`（`确认 n`／`否决`）；覆盖表 `docs/forms-parity.md`。
+- **公开基准评测**：LoCoMo-10 与 LongMemEval 适配层（`hippocampus bench …`），报
+  "答案/证据是否进上下文＋tokens＋延迟"，**默认钉离线档**（不发任何出站请求），
+  `--online` 才可走模型臂；协议与哈希见 `docs/benchmark.md`。
+- **性能压测脚本** `scripts/bench_scale.py`：自建真实运行库同规模合成库
+  （1154 记忆／2406 实体／6035 关系／497 事件）测检索/注入/固化/写入/审计与守卫开销。
+- **审计/观察文件轮转**：`audit.jsonl`／`observe.jsonl` 到上限滚动（保留份数可配，
+  默认 8 MiB×3 份），`explain` 可读滚动份。
+- **代理线收口**：带 `tools` 的 chat／anthropic／responses 三向真服务端到端；
+  `cache_control_passthrough` 从活跃参数生效；`/v1/models` 回配置的模型名；
+  `proxy.session_bucketing`＝day／hour／none 可配。
+- **离线档守卫边界**：补实体走**规则抽取**（不再空转），消歧仍软失败跳过；`docs/offline.md` 写死。
+- **CI 加两条闸**：形态路径（真服务／流式／鉴权／tools）先断言 proxy extra 在再跑；
+  demo 加**阈值断言**（记忆开 ≥9/10、记忆关 ≤6/10）。
+- **文档**：`docs/benchmark.md`（评测协议）、`docs/forms-parity.md`（两形态覆盖表）、
+  `docs/framework-ammo.md`（框架弹药卡）、`docs/verification-design.md`（可求证机制设计稿，待过目）。
+
+### 安全（Mimosa 审计 9 项处置）
+
+- SQL 标识符白名单：`PRAGMA/ALTER` 拼串前校验（表名／列名／DDL 片段）；
+  BM25 建索引的表名走白名单（只允许 `memories`／`episodes`）。
+- `embedding_models` 下载链：仓库名白名单（`org/name` 两段）＋ 出站 URL 校验
+  （只 http/https、**主机必须等于配置端点**）＋ 可注入抓取器（`set_http_fetcher`）。
+- `llm_proxy.call_upstream`（随迁备用路径）：出站前过 `validate_endpoint_url`。
+
 ## [0.2.0] — 2026-09-17
 
 第二个版本：把"移植了但没接线"的守卫接进生产路径，补齐流式／鉴权／审计／评测四块，
