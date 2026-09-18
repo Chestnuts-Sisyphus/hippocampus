@@ -17,6 +17,39 @@
 - 会话缓存上限：多账户长跑内存有界（`HIPPOCAMPUS_SESSION_CACHE_MAX`，默认 16，见
   `docs/roadmap.md` A2/T5）。
 
+## 二·五、服务形态（管理口：`/run` `/trace` `/health`，七轮 T3／E1）
+
+代理形态是"模型口"（客户端把 base_url 指过来），**服务形态是"管理口"**：不给模型转发，
+只暴露"跑一轮 / 追一次证据链 / 查健康"三件事，给运维脚本与桌面端按钮用。
+
+```bash
+hippocampus serve                      # 默认 127.0.0.1:8765（与代理形态同一端口，二择一起动）
+hippocampus serve --port 8899          # 换端口
+hippocampus serve --host 0.0.0.0 --allow-remote   # 显式承认要出网卡（无令牌则拒起）
+```
+
+| 端点 | 语义 | 备注 |
+|---|---|---|
+| `POST /run` | 执行一轮"注入＋固化"，回 `run_id`／注入内容／剔除原因／本轮写库 id／挂起数 | 请求体 `{"text": "…"}`；scope 走 `X-Hippocampus-Account`／`X-Hippocampus-Session` 头 |
+| `GET /trace?run_id=…` | 按 `run_id` 取那次注入的**全链路审计**（候选全集＋injected 标记＋剔除原因）＋观察事件 | 依赖审计开关（`audit_enabled`，默认开）；查不到回 404 并说明原因 |
+| `GET /health` | 索引与库健康（嵌入档／计数／锁／`index_health`） | 与代理形态同一个实现 |
+
+安全默认（与 A2 一致，不可省略）：
+
+1. **只绑环回**。传非环回 `--host` 必须同时给 `--allow-remote`，否则拒起（退出码 2）；
+   非环回还必须有实例令牌，拿不到令牌文件同样拒起——管理口能写记忆，裸奔到局域网不可接受。
+2. **鉴权与代理形态同一条**：`Authorization: Bearer <instance_token>`；缺令牌 401。
+3. **不出站**：服务形态起的是离线档（`upstream=None`），`/run` 只读写本机记忆库。
+
+```bash
+TOKEN=$(cat ~/.hippocampus/instance_token)
+curl -s -X POST http://127.0.0.1:8765/run \
+  -H "Authorization: Bearer $TOKEN" -H "content-type: application/json" \
+  -H "X-Hippocampus-Account: me" -d '{"text": "我找岗位时有哪些硬性限制？"}'
+curl -s "http://127.0.0.1:8765/trace?run_id=<上一条返回的 run_id>" \
+  -H "Authorization: Bearer $TOKEN" -H "X-Hippocampus-Account: me"
+```
+
 ## 三、局域网/公网暴露（**不推荐**，真需要时按下面做）
 
 1. **换监听地址**：`config.json` 或环境变量把 `host` 改为 `0.0.0.0`（任意网卡）或具体内网 IP。

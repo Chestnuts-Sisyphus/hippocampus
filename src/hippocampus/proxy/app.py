@@ -77,6 +77,16 @@ def _scope_from(headers: dict[str, str], default_account: str = "default", bucke
     return Scope(account=account, session=session[:64], source="user")
 
 
+def _unauthorized_body() -> dict[str, Any]:
+    """缺/错实例令牌时的统一响应体（`/v1/*`、`/run`、`/trace` 共用一条鉴权口径）。"""
+    return {
+        "error": {
+            "message": "未提供有效的实例令牌（首次启动生成的令牌见 `hippocampus doctor`）",
+            "type": "unauthorized",
+        }
+    }
+
+
 def build_app(core: MemoryCore, *, confirm_block: bool = True, offline: bool = False, upstream: Any = None, auth_token: str | None = None):
     """构造 FastAPI 应用。
 
@@ -113,6 +123,7 @@ def build_app(core: MemoryCore, *, confirm_block: bool = True, offline: bool = F
             "upstream_endpoint": mem_config.upstream_endpoint(),
             "embedding": core.embedding_tier(),
             "stats": core.stats(scope),
+            "index": core.index_health(scope),
             "lock": core.lock_status(scope),
         }
 
@@ -129,11 +140,7 @@ def build_app(core: MemoryCore, *, confirm_block: bool = True, offline: bool = F
     async def _handle(request: Request, inbound: str):
         """三种入站格式共用的一条链（识别 → 鉴权 → 注入 → 转发 → 固化 → 追加确认块）。"""
         if not _authorized(request):
-            return JSONResponse(
-                status_code=401,
-                content={"error": {"message": "未提供有效的实例令牌（首次启动生成的令牌见 `hippocampus doctor`）",
-                                    "type": "unauthorized"}},
-            )
+            return JSONResponse(status_code=401, content=_unauthorized_body())
         try:
             body = await request.json()
         except Exception as e:
@@ -270,6 +277,68 @@ def build_app(core: MemoryCore, *, confirm_block: bool = True, offline: bool = F
     async def messages(request: Request):
         """Anthropic Messages 入站（Claude Code 一类客户端）。"""
         return await _handle(request, formats.INBOUND_ANTHROPIC)
+
+    # ---------- 服务化端点（七轮 T3 / 待拍板 B1 的 E1）：管理口，不是模型口 ----------
+    # 与代理形态共用一份应用与一套令牌：`/run` 走"注入＋固化"一轮，`/trace` 取审计。
+    # 默认只监听 127.0.0.1（`serve` 的口径），鉴权与 `/v1/*` 同一条 `_authorized`。
+
+    @app.post("/run")
+    async def run_turn(request: Request):
+        """执行一轮"注入＋提取固化"，返回这一轮的可见决策。
+
+        请求体：`{"text": "…", "assistant_text": "…"?}`（`assistant_text` 只作触发信号，
+        模型输出不进正式记忆）。scope 仍按头解析（`X-Hippocampus-Account` 等）。
+        """
+        if not _authorized(request):
+            return JSONResponse(status_code=401, content=_unauthorized_body())
+        try:
+            body = await request.json()
+        except Exception as e:
+            return JSONResponse(status_code=400, content={"error": {"message": f"请求体不是合法 JSON: {e}"}})
+        text = str((body or {}).get("text") or "").strip()
+        if not text:
+            return JSONResponse(status_code=400, content={"error": {"message": "缺少 text（这一轮的输入）"}})
+        scope = _scope_from(dict(request.headers))
+        injection = core.inject_finalize(scope, text)
+        turn = core.consolidate(scope, user_text=text, assistant_text=str((body or {}).get("assistant_text") or ""))
+        return {
+            "run_id": injection.run_id,
+            "scope": {"account": scope.account, "session": scope.session},
+            "injected": [
+                {"id": i.id, "kind": i.kind, "content": i.content, "score": round(i.score, 4)}
+                for i in injection.items
+            ],
+            "dropped": [{"id": d.id, "reason": d.reason, "stage": d.stage} for d in injection.dropped],
+            "note": injection.note,
+            "written_ids": list(turn.write.ids),
+            "observed_ids": list(turn.observed_ids),
+            "pending": turn.pending,
+            "confirm_block": turn.confirm_block,
+        }
+
+    @app.get("/trace")
+    def run_trace(request: Request):
+        """按 `run_id` 取那次注入的全链路审计（候选全集＋剔除原因）＋观察事件。
+
+        取数走 `MemoryCore.trace_run()`——形态层不直接读记忆层的日志文件（A22 架构闸）。"""
+        if not _authorized(request):
+            return JSONResponse(status_code=401, content=_unauthorized_body())
+        run_id = (request.query_params.get("run_id") or "").strip()
+        if not run_id:
+            return JSONResponse(status_code=400, content={"error": {"message": "缺少 run_id（/run 的返回值）"}})
+        scope = _scope_from(dict(request.headers))
+        result = core.trace_run(scope, run_id)
+        if not result["found"]:
+            return JSONResponse(
+                status_code=404,
+                content={
+                    "error": {
+                        "message": f"账户 {result['account']} 的审计里没有 run_id={run_id}"
+                        "（审计开关关了？还是换过账户？）"
+                    }
+                },
+            )
+        return result
 
     return app
 
@@ -420,4 +489,42 @@ def serve(*, host: str, port: int, home: str | Path | None = None, confirm_block
     return 0
 
 
-__all__ = ["CONFIRM_HEADER", "build_app", "make_upstream", "serve"]
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def serve_management(
+    *, host: str = "127.0.0.1", port: int, home: str | Path | None = None, allow_remote: bool = False
+) -> int:
+    """服务形态（管理口，七轮 T3／E1）：只开 `/run` `/trace` `/health`，不转发上游。
+
+    安全默认（与 A2 同口径，写进 docs/deployment.md）：
+    - 只绑环回。要绑到非环回地址必须显式 `allow_remote=True`，**且强制要有实例令牌**
+      ——没令牌就不起（管理口能写记忆，暴露到局域网裸奔是不可接受的）；
+    - 与代理形态同一份应用、同一套鉴权，端口也共用（两形态择一起动，不抢端口）。
+    """
+    import uvicorn
+
+    loopback = host in _LOOPBACK_HOSTS
+    if not loopback and not allow_remote:
+        print(f"拒绝启动：管理口默认只绑环回，收到 host={host}。确认要暴露到非环回请显式加 --allow-remote。")
+        return 2
+    core = MemoryCore(home=home)
+    try:
+        token = mem_config.instance_token(create=True)
+        if not token and not loopback:
+            print("拒绝启动：非环回绑定必须有实例令牌，但当前环境拿不到令牌文件。")
+            return 2
+        app = build_app(core, confirm_block=True, offline=True, upstream=None, auth_token=token or None)
+        print(f"Hippocampus 服务形态（管理口）监听 http://{host}:{port}")
+        print("  POST /run   执行一轮注入＋固化（body: {\"text\": \"…\"}；scope 走 X-Hippocampus-Account/Session 头）")
+        print("  GET  /trace 按 run_id 取那次注入的全链路审计（候选全集＋剔除原因＋观察事件）")
+        print("  GET  /health 索引与库健康（嵌入档／计数／锁／索引）")
+        if token:
+            print(f"  实例令牌已启用（前 8 位 {token[:8]}…）：请求带 `Authorization: Bearer <完整令牌>`")
+        uvicorn.run(app, host=host, port=port, log_level="warning")
+    finally:
+        core.close()
+    return 0
+
+
+__all__ = ["CONFIRM_HEADER", "build_app", "make_upstream", "serve", "serve_management"]
