@@ -44,6 +44,8 @@
   （调用方看不到断在哪一段）→ 现兜底为 **502** 并回带已完成的注入结果（`run_id`／`injected`／
   `dropped`／`note`），回归测试 `test_run_degrades_to_502_when_consolidation_fails`；
   这条是 pytest 全绿状态下由"真起 uvicorn＋真发 HTTP"才暴露的（测试数 515→**516**）。
+  同轮冒烟另测得：`/run`／`/trace` 缺令牌确为 401，但 **`/health` 自 0.1.0 起是免鉴权探针位**
+  （不带令牌回 200）→ 文档按"两档"如实改写，**是否收紧登记为待拍板项**（`docs/roadmap.md` §一）。
 
 治理（T5 真机验收）：
 
