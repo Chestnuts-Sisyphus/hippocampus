@@ -79,7 +79,9 @@ jobs:
             --sentinel --sentinel-threshold 25.0
 
       - name: 示例库扫描（无个人数据、无真实记忆）
-        run: python scripts/scan_personal_data.py --home "${{ env.HIPPOCAMPUS_HOME }}/accounts/ci"
+        # scan_personal_data expects the demo ROOT (hippocampus.db lives at root level,
+        # seed --account ci writes into <root>/hippocampus.db; accounts/<name>/ holds jsonl only)
+        run: python scripts/scan_personal_data.py --home "${{ env.HIPPOCAMPUS_HOME }}"
 
   core-only:
     runs-on: ubuntu-latest
