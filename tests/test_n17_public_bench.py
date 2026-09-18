@@ -86,7 +86,7 @@ def test_ingest_history_counts_and_pools(core, scope):
             {"text": "天津不错", "role": "assistant", "speaker": "B"},
         ],
     )
-    assert out == {"episodes": 2, "memories": 2}
+    assert out == {"episodes": 2, "memories": 2, "skipped": 0}
     stats = core.stats(scope)
     assert stats["memories"] == 2 and stats["episodes"] == 2
     assert stats["entities"] >= 2, "说话人应建成实体"
@@ -174,17 +174,20 @@ def test_sha256_file(tmp_path):
     assert pb.sha256_file(tmp_path / "missing.json") == ""
 
 
-def test_memory_core_ingest_is_additive_only(core, scope):
-    """导入是"只加"的：再导一次同样内容 → 行数翻倍（不去重），不覆盖既有记忆。
+def test_memory_core_ingest_is_idempotent(core, scope):
+    """导入精确去重（C1 六轮）：同内容重复导入只入一次，不覆盖既有记忆。
 
-    公开基准的每题上下文要原样进库（去重属于对话固化链的职责），所以导入路径刻意不做
-    去重——这条钉住"迁移/评测回灌"的语义，避免以后有人顺手加去重改变口径。
+    磨平 T10 教训（复用 home 重跑把库滚大、污染内存与命中数字）——同批历史
+    二跑，记忆/经历两池都判重跳过，行数不变；返回 skipped 如实计数。
     """
     turns = [{"text": "重复的一句话", "role": "user"}]
-    core.ingest_history(scope, turns)
-    before = core.stats(scope)["memories"]
-    core.ingest_history(scope, turns)
-    assert core.stats(scope)["memories"] == before + 1
+    out1 = core.ingest_history(scope, turns)
+    stats = core.stats(scope)
+    before = stats["memories"]
+    out2 = core.ingest_history(scope, turns)
+    assert core.stats(scope)["memories"] == before
+    assert out1["skipped"] == 0 and out2["skipped"] == 1
+    assert out2["memories"] == 0 and out2["episodes"] == 0
 
 
 def test_scope_isolation_between_bench_accounts(home):
