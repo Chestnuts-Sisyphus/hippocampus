@@ -45,6 +45,8 @@ def step(name: str, ok: bool, detail: str = "") -> bool:
 
 
 def main(argv: list[str] | None = None) -> int:
+    # Windows 默认 GBK 控制台打不出 ✓/✗ 会 UnicodeEncodeError（六轮 G7 交付缺陷，09-19 补）
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     ap = argparse.ArgumentParser(description="跨会话长任务一键演示（三形态 + 断言）")
     ap.add_argument("--home", default="D:/tmp/hc-demo-flow", help="数据根（默认 D:/tmp/hc-demo-flow）")
     ap.add_argument("--port", type=int, default=8765, help="代理形态端口（默认 8765）")
