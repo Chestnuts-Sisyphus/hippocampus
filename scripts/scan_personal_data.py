@@ -46,9 +46,11 @@ for _stream in (sys.stdout, sys.stderr):
             pass
 
 def seed_contents() -> set[str]:
+    from hippocampus.eval.questions import QUESTIONS
     from hippocampus.seed import SEED_ITEMS
 
-    return {item.content for item in SEED_ITEMS}
+    # demo --memories 臂会把题集问句原文写进 episodes——与 SEED_ITEMS 同为仓内合成清单，一并允许
+    return {item.content for item in SEED_ITEMS} | {q.text for q in QUESTIONS}
 
 
 def _iter_values(conn: sqlite3.Connection) -> list[tuple[str, str]]:
