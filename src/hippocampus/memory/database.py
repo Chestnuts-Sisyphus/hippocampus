@@ -55,6 +55,11 @@ CREATE TABLE IF NOT EXISTS memories (
     change_context     TEXT DEFAULT '',
     security_flag      INTEGER DEFAULT 0, -- P04: 内容注入检测标记（0=正常 1=可疑 2=高危）
     shadow             INTEGER DEFAULT 0, -- 观察轨: 1=观察期（不污染正式检索） 0=正式
+    -- 可求证机制（七轮 T2 / 正本 §三-4）：四列全部带默认值＝v1"只追加"契约内
+    verification_status   TEXT    DEFAULT 'unverifiable', -- verified | refuted | unverifiable
+    verification_method   TEXT    DEFAULT '',             -- 命中的判据名（L1/L2/L3）
+    verified_at           INTEGER DEFAULT 0,              -- 求证时间（0=未求证）
+    verification_evidence TEXT    DEFAULT '',             -- 证据摘要（只记摘要，不落内容）
     created_at         INTEGER NOT NULL,
     updated_at         INTEGER NOT NULL
 );
@@ -232,6 +237,8 @@ def seed_initial_snapshot(conn: sqlite3.Connection) -> bool:
             "fluid_flow_max": 3,
             # 任务书 3B（缓存侧）新参数：cache_control 透传开关
             "cache_control_passthrough": True,
+            # 七轮 T2（可求证机制）：L1+L2 默认开、L3 外站探测默认关
+            **VERIFICATION_PARAM_DEFAULTS,
         },
         ensure_ascii=False,
     )
@@ -400,6 +407,53 @@ def ensure_security_schema(conn: sqlite3.Connection) -> dict[str, bool]:
     return added
 
 
+# 七轮 T2（可求证机制）：两个开关都是**活跃参数**（可人工标定，与检索阈值同一通道）。
+VERIFICATION_PARAM_DEFAULTS: dict[str, Any] = {
+    "verification_enabled": True,   # L1+L2（零成本、纯本地）默认开
+    "verification_external": False,  # L3 出站探测默认关——开了才会产生网络请求
+}
+
+
+def ensure_verification_schema(conn: sqlite3.Connection) -> dict[str, bool]:
+    """幂等迁移：老库补 `memories` 的四个求证列（新库建表已含）。
+
+    列全部带默认值 → 符合 v1"只追加"契约（`scripts/check_interface.py` 的第三条）。"""
+    added = {
+        "verification_status": _ensure_column(
+            conn, "memories", "verification_status", "verification_status TEXT DEFAULT 'unverifiable'"
+        ),
+        "verification_method": _ensure_column(
+            conn, "memories", "verification_method", "verification_method TEXT DEFAULT ''"
+        ),
+        "verified_at": _ensure_column(conn, "memories", "verified_at", "verified_at INTEGER DEFAULT 0"),
+        "verification_evidence": _ensure_column(
+            conn, "memories", "verification_evidence", "verification_evidence TEXT DEFAULT ''"
+        ),
+    }
+    conn.commit()
+    return added
+
+
+def ensure_verification_params(conn: sqlite3.Connection) -> None:
+    """幂等：活跃快照缺求证开关 → 按默认补齐（不建新快照，不动其他参数）。"""
+    row = conn.execute("SELECT id, params FROM param_snapshots WHERE is_active=1 LIMIT 1").fetchone()
+    if not row:
+        return
+    try:
+        params = json.loads(row["params"])
+    except (json.JSONDecodeError, TypeError):
+        return
+    missing = {k: v for k, v in VERIFICATION_PARAM_DEFAULTS.items() if k not in params}
+    if not missing:
+        return
+    params.update(missing)
+    conn.execute(
+        "UPDATE param_snapshots SET params=? WHERE id=?",
+        (json.dumps(params, ensure_ascii=False), row["id"]),
+    )
+    conn.commit()
+
+
 # [HIPPO] 待确认块持久化表。
 # 前身的确认队列只在内存里（`MemorySession.pending_blocks`）——进程一退，挂起的冲突就
 # "看不见了"，用户下个会话没法再裁决，而库里那条记忆还挂着 candidate 状态（既不生效
@@ -423,6 +477,34 @@ def ensure_pending_schema(conn: sqlite3.Connection) -> None:
     conn.commit()
 
 
+def apply_migrations(conn: sqlite3.Connection) -> None:
+    """**唯一**的建库＋幂等迁移序列（`connect()` 与 `memory_bridge` 的账户会话共用）。
+
+    为什么要抽出来：账户库（`accounts/<id>/memory.db`）由 `MemorySession` 用
+    "等价 5 行写法"自己建，与 `connect()` 各持一份序列——本轮加求证四列时只改了
+    `connect()`，账户库就漏了补参数（实测漂移）。以后新增 `ensure_*` 只改这一处。
+    每条都是幂等的（`CREATE TABLE IF NOT EXISTS` ／ `_ensure_column` 先查后加）。"""
+    conn.executescript(SCHEMA)
+    ensure_b2_schema(conn)
+    seed_initial_snapshot(conn)
+    ensure_event_time_param(conn)
+    ensure_retrieval_params(conn)
+    ensure_injection_params(conn)
+    ensure_learning_params(conn)
+    ensure_security_schema(conn)
+    ensure_verification_schema(conn)
+    ensure_verification_params(conn)
+    ensure_pending_schema(conn)
+    # [HIPPO] 嵌入档 → 检索参数标定（幂等，只补缺；见 memory/calibration.py）。
+    # 放在建库收尾，保证任何入口（CLI／测试／形态层）拿到的库都带正确量纲的阈值。
+    try:
+        from hippocampus.memory import calibration, config
+
+        calibration.apply_tier_params(conn, config.get_embedding_config()["model"])
+    except Exception:
+        pass
+
+
 def connect(path: Path | str | None = None, *, check_same_thread: bool = False) -> sqlite3.Connection:
     """建/开库（幂等迁移）。
 
@@ -433,23 +515,7 @@ def connect(path: Path | str | None = None, *, check_same_thread: bool = False) 
     target.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(target), check_same_thread=check_same_thread)
     conn.row_factory = sqlite3.Row
-    conn.executescript(SCHEMA)
-    ensure_b2_schema(conn)
-    seed_initial_snapshot(conn)
-    ensure_event_time_param(conn)
-    ensure_retrieval_params(conn)
-    ensure_injection_params(conn)
-    ensure_learning_params(conn)
-    ensure_security_schema(conn)
-    ensure_pending_schema(conn)
-    # [HIPPO] 嵌入档 → 检索参数标定（幂等，只补缺；见 memory/calibration.py）。
-    # 放在建库收尾，保证任何入口（CLI／测试／形态层）拿到的库都带正确量纲的阈值。
-    try:
-        from hippocampus.memory import calibration, config
-
-        calibration.apply_tier_params(conn, config.get_embedding_config()["model"])
-    except Exception:
-        pass
+    apply_migrations(conn)
     return conn
 
 
@@ -493,14 +559,20 @@ def add_memory(
     security_flag: int = 0,
     shadow: int = 0,
     status: str = "active",
+    verification_status: str = "unverifiable",
+    verification_method: str = "",
+    verified_at: int = 0,
+    verification_evidence: str = "",
 ) -> str:
     # [HIPPO] 追加 status 参数（默认 "active" = 前身行为不变）：
     # P1 修复与 A34 用 `status='candidate'`（挂起待确认，不参与注入、不参与去重基准）。
+    # [HIPPO] 追加可求证四参数（七轮 T2，默认值=改动前行为）：见 memory/verification.py。
     mid = gen_id("m")
     conn.execute(
         "INSERT INTO memories (id, type, status, entity_ids, scene_tags, scene_description, content, "
-        "content_lemmatized, source_quote, source_episode_id, change_context, security_flag, shadow, created_at, updated_at) "
-        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        "content_lemmatized, source_quote, source_episode_id, change_context, security_flag, shadow, "
+        "verification_status, verification_method, verified_at, verification_evidence, created_at, updated_at) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
         (
             mid,
             mtype,
@@ -515,6 +587,10 @@ def add_memory(
             "",
             int(security_flag or 0),
             int(shadow or 0),
+            verification_status,
+            verification_method,
+            int(verified_at or 0),
+            verification_evidence,
             now_ms(),
             now_ms(),
         ),

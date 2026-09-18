@@ -64,3 +64,26 @@ def log_confirmation(
             "loser_ids": loser_ids or [],
         },
     )
+
+
+def log_verification(
+    account_id: str, content: str, status: str, method: str = "", evidence: str = "", dropped: bool = False
+) -> None:
+    """求证事件（七轮 T2）：一次判定的状态／判据／证据摘要，以及是否因此**不进正式记忆**。
+
+    A42 的核对点就在这里：模型幻觉出的资源被丢弃时，正式库里没有，但观察日志必须有痕。
+    与其余事件同一纪律——只记摘要（内容截断 200 字），不落全文。"""
+    import time
+
+    _append(
+        account_id,
+        {
+            "event": "verification",
+            "ts": int(time.time() * 1000),
+            "status": status,
+            "method": method,
+            "evidence": (evidence or "")[:200],
+            "content_head": (content or "")[:200],
+            "dropped": bool(dropped),
+        },
+    )

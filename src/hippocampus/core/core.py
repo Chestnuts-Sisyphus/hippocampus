@@ -395,6 +395,36 @@ class MemoryCore:
             except Exception as e:  # 软失败：守卫坏掉不能阻断写入
                 sys.stderr.write(f"[core] 安全守卫跳过（软失败）: {e}\n")
 
+            # 1.5) 可求证（七轮 T2 / 正本 §三-4）：L1 存在性·自洽 ＋ L2 库内一致性；L3 默认关
+            #      三态处置——verified 直存并留证据、refuted 按来源分流、unverifiable 直存不打可疑。
+            ver = None
+            ver_ask_user = ""
+            try:
+                from hippocampus.memory import verification as vmod
+
+                vparams = rt.get_active_params(session.conn) or {}
+                if vparams.get("verification_enabled", True):
+                    ver = vmod.verify(
+                        text,
+                        kind,
+                        conn=session.conn,
+                        source=src,
+                        external=bool(vparams.get("verification_external", False)),
+                    )
+                    if ver.status == vmod.REFUTED:
+                        if src == "model":
+                            # A42：模型幻觉出的资源不进正式记忆，观察日志留痕（不打扰用户）
+                            self._log_verification(session, scope, text, ver, dropped=True)
+                            out.skipped.append(
+                                Dropped(id="", reason=f"求证否证：{ver.evidence}", stage="verification")
+                            )
+                            session.conn.commit()
+                            return out
+                        # A43：用户来源被否证**不静默丢**——挂起一次询问（下方转 candidate）
+                        ver_ask_user = f"你说的这个本机没找到：{ver.evidence}（是笔误、还是指别的机器？）"
+            except Exception as e:
+                sys.stderr.write(f"[core] 求证跳过（软失败）: {e}\n")
+
             # 2) 实体解析/创建
             entity_ids: list[str] = []
             entity_names = entities or []
@@ -452,7 +482,7 @@ class MemoryCore:
             # 规则冲突检测（离线可用）：同对象取值不同 → 挂起确认，人工裁决前旧值继续生效。
             # 前身的冲突判定是纯 LLM（无 key 就断链），这条机械判据让"改口→确认"在离线档
             # 也成立（A36／A30-③／A24）。
-            if hold_old is None and supersede_old is None and src != "model" and not explicit:
+            if hold_old is None and supersede_old is None and src != "model" and not explicit and not ver_ask_user:
                 try:
                     from hippocampus.memory import conflict as conflict_mod
 
@@ -468,7 +498,13 @@ class MemoryCore:
                 except Exception as e:
                     sys.stderr.write(f"[core] 规则冲突检测跳过（软失败）: {e}\n")
 
-            status = "candidate" if hold_old else "active"
+            # 求证否证（用户来源）→ 挂起一次询问。hold_old 用空串＝"没有对立旧条，只是问一句"，
+            # 确认块里只有这条 candidate，用户"确认 n"即转正、"否决"即退回（A43：不静默丢）。
+            if ver_ask_user and hold_old is None and supersede_old is None:
+                hold_old, hold_reason = "", ver_ask_user
+                out.note = "本机没找到声明的路径/链接：已挂起待确认（不丢弃）"
+
+            status = "candidate" if hold_old is not None else "active"
             mid = db.add_memory(
                 session.conn,
                 kind,
@@ -479,7 +515,13 @@ class MemoryCore:
                 security_flag=flag,
                 shadow=shadow,
                 status=status,
+                verification_status=ver.status if ver else "unverifiable",
+                verification_method=ver.method if ver else "",
+                verified_at=ver.checked_at if ver else 0,
+                verification_evidence=ver.evidence if ver else "",
             )
+            if ver and ver.status != "unverifiable":
+                self._log_verification(session, scope, text, ver, dropped=False)
             out.ids.append(mid)
             out.created = 1
             if supersede_old is not None:
@@ -505,6 +547,22 @@ class MemoryCore:
             return dedup.find_semantic_duplicate(session.conn, collections, kind, text, exclude_session_id=session_id)
         except Exception:
             return None
+
+    def _log_verification(self, session: mb.MemorySession, scope: Scope, content: str, result, *, dropped: bool) -> None:
+        """把一次求证判定落进账户 `observe.jsonl`（设计稿 §五-5；软失败，绝不断主流程）。"""
+        try:
+            from hippocampus.memory import observe_log
+
+            observe_log.log_verification(
+                scope.account,
+                content,
+                status=result.status,
+                method=result.method,
+                evidence=result.evidence,
+                dropped=dropped,
+            )
+        except Exception as e:
+            sys.stderr.write(f"[core] 求证观察日志跳过（软失败）: {e}\n")
 
     def _queue_pending(
         self, session: mb.MemorySession, conflicts: list[tuple[str, str, str]], *, reason: str = ""
@@ -1342,6 +1400,33 @@ class MemoryCore:
         scope = _as_scope(scope)
         session = self._session(scope)
         return dict(rt.get_active_params(session.conn) or {})
+
+    def trace_run(self, scope: Scope, run_id: str) -> dict[str, Any]:
+        """按 `run_id` 取那次注入的全链路证据（**形态层取数的唯一入口**）。
+
+        为什么要经这里：形态层（代理／服务化／CLI）直接 `import hippocampus.memory.*`
+        就绕过了"两形态共用一份记忆核心"的定位，A22 架构闸会红。审计与观察日志都在
+        账户目录下，读它们属于记忆层职责，所以取数在核心、格式化在形态层。
+        """
+        scope = _as_scope(scope)
+        run_id = (run_id or "").strip()
+        result: dict[str, Any] = {"run_id": run_id, "account": scope.account, "audit": [], "observe": [], "found": False}
+        if not run_id:
+            return result
+        from hippocampus.memory import audit as audit_mod
+        from hippocampus.memory import jsonl_log, observe_log
+
+        events = [e for e in audit_mod.load_events(None, scope.account, include_rotated=True) if e.get("run_id") == run_id]
+        result["audit"] = events
+        result["found"] = bool(events)
+        observe_file = observe_log.observe_path(scope.account)
+        if observe_file.exists():
+            result["observe"] = [
+                e
+                for e in jsonl_log.load_events(observe_file, include_rotated=True)
+                if e.get("run_id") == run_id or e.get("event") in ("verification", "confirmation")
+            ]
+        return result
 
     def index_health(self, scope: Scope) -> dict[str, Any]:
         """索引健康（doctor 用，B5）：chroma 可写性＋集合条数 vs 库内 active 条数＋同步错误。

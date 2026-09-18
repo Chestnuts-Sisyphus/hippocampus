@@ -83,27 +83,17 @@ def _restate_threshold(text: str, conn: sqlite3.Connection | None = None) -> flo
 
 
 # P2（HC-0815-02 节点2）：AI 幻觉编造资源校验（观察线：AI 无文件系统能力，编造 3/4 文件名）。
-# 只校验「完整绝对路径」声明（AI 编造的是具体路径如 D:/AI/xxx.py）；裸文件名
-# （「密钥在 config.yaml 里」）不校验——AI 可能引用用户环境中的真实文件，误杀风险高。
-# 字符集含 ~/%（Windows 8.3 短路径如 ADMINI~1、环境变量引用如 %USERPROFILE%）。
-_RES_PATH_RE = re.compile(
-    r"(?:[A-Za-z]:[\\/][\w\-.\\/ ~%]+\.\w{1,6})"  # 盘符绝对路径 + 扩展名
-    r"|(?:/[\w\-.\\/ ~%]+\.\w{1,6})",  # POSIX 绝对路径 + 扩展名
-    re.IGNORECASE,
-)
+# [HIPPO] 七轮 T2：判据本体已收敛到 `memory/verification.py`（L1 路径存在性），这里只留
+# 观察轨的调用点。口径不变——只校验「完整绝对路径」声明（AI 编造的是具体路径如
+# D:/AI/xxx.py）；裸文件名（「密钥在 config.yaml 里」）不校验，AI 可能引用用户环境中的
+# 真实文件，误杀风险高。
 
 
 def _resource_plausible(content: str) -> bool:
-    """resource 记忆事实性校验：内容声明的绝对路径在本机至少存在一个 → 可信；
-    全部不存在 → 幻觉候选（AI 编造，观察线实测 3/4 文件名）。无绝对路径声明
-    （裸文件名/相对路径/无路径）→ 放行（不适用文件系统校验）。"""
-    if not content or not content.strip():
-        return True
-    paths = [m.group(0).strip().strip('"\'') for m in _RES_PATH_RE.finditer(content)]
-    paths = [p for p in paths if p]
-    if not paths:
-        return True
-    return any(Path(p).exists() for p in paths)
+    """resource 记忆事实性校验：声明的绝对路径本机至少存在一个 → 可信。"""
+    from hippocampus.memory import verification
+
+    return verification.path_claims_plausible(content)
 
 
 class MemorySession:
@@ -125,25 +115,12 @@ class MemorySession:
         # prepare_injection），非重入锁会自锁死。
         self.lock = threading.RLock()
 
-        # db.connect() 用全局 DB_PATH，这里等价 5 行写法（async 并发防串库）
+        # 建库与迁移：走 `database.apply_migrations` 这**一个**入口。
+        # 以前这里自己抄了一份等价序列（注释写着"等价 5 行写法"），结果 connect() 加了
+        # 新迁移时账户库会静默漏掉——七轮 T2 加求证参数时就实测到这场漂移。
         self.conn = sqlite3.connect(str(self.db_path), check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
-        self.conn.executescript(db.SCHEMA)
-        db.ensure_b2_schema(self.conn)
-        db.seed_initial_snapshot(self.conn)
-        db.ensure_event_time_param(self.conn)
-        db.ensure_retrieval_params(self.conn)
-        db.ensure_injection_params(self.conn)
-        db.ensure_learning_params(self.conn)
-        db.ensure_security_schema(self.conn)
-        # [HIPPO] 嵌入档 → 检索参数标定（幂等，只补缺）
-        try:
-            from hippocampus.memory import calibration
-            from hippocampus.memory import config as _cfg
-
-            calibration.apply_tier_params(self.conn, _cfg.get_embedding_config()["model"])
-        except Exception:
-            pass
+        db.apply_migrations(self.conn)
 
         if chromadb is None:
             # 词法降级：没有向量库也能用（BM25／图／事件线索 + 完全去重）
