@@ -15,6 +15,12 @@ permissions:
 jobs:
   full:
     runs-on: ${{ matrix.os }}
+    # Windows default shell is pwsh, which cannot parse bash line-continuation
+    # "\" in multi-line run steps (sentinel step ParserError). bash ships with
+    # windows-latest runners; ubuntu default is already bash.
+    defaults:
+      run:
+        shell: bash
     strategy:
       fail-fast: false
       matrix:
