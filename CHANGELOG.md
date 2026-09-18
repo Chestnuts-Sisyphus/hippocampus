@@ -77,8 +77,11 @@
   整仓 tracked 零命中）；
 - KEY 母库 `D:/AI/KEY/GITHUB-TOKENS.txt` 以**文末登记表**方式逐把补注 scope 能力面
   （既有行一字未改，`git-askpass` 垫片取第 2 行长度复核仍是 93 字符，不影响任何按行号取值的读取方）；
-- 顺带测得一条硬边界：**在册凭据没有一把带 `delete_repo`**，删仓需 owner 网页端操作
-  （T4 安全闸已通过但执行被权限挡住，见沉淀文档证据表）。
+- 顺带测得一条硬边界：**在册凭据没有一把带 `delete_repo`**——母库 5 把逐把试 + **gh 自身 keyring 登录**
+  （`gho_` OAuth，scopes 仅 `gist/read:org/repo`，对该仓 `permissions.admin=true`）共 **6 条路径全 403**，
+  GitHub 回话直指缺 scope（**admin ≠ 可删**）→ 删除动作未执行，待 `gh auth refresh -s delete_repo` 或网页端操作；
+  T4 **安全闸本身已过且口径拉到最强**：`git fsck --full` 干净、本地 `git ls-tree -r main` 与远端 tree
+  **各 77 个 blob、SHA+路径逐字一致（diff 0 行）**、远端无 issues/releases/fork/额外 ref（证据表见沉淀文档附录 C）。
 
 
 
