@@ -22,7 +22,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import sys
 import threading
@@ -90,7 +89,6 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\n-- [3/3] 代理形态：127.0.0.1:{args.port}（离线回执列出注入记忆）")
         try:
             import httpx
-
             import uvicorn
 
             from hippocampus.proxy.app import build_app

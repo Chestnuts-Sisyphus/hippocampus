@@ -105,7 +105,7 @@ def main(argv: list[str] | None = None) -> int:
 
     total = agree_n + len(disagree)
     div = (len(disagree) / total * 100.0) if total else 0.0
-    print(f"\n== 双判分歧率 ==")
+    print("\n== 双判分歧率 ==")
     print(f"共 {total} 题：一致 {agree_n}，分歧 {len(disagree)} → 分歧率 {div:.1f}%"
           f"（n={total}；两个 judge 为 {os.environ.get('HIPPOCAMPUS_MODEL', '?')} vs deepseek-chat）")
     print(f"调用 {stats.judge_calls} 次，估算花费 ¥{stats.estimated_cost():.3f}，耗时 {time.time()-t0:.0f}s")

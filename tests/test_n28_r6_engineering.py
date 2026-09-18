@@ -153,6 +153,6 @@ def test_cli_help_line_has_no_candidates_flag():
     from pathlib import Path
 
     text = Path("src/hippocampus/cli.py").read_text(encoding="utf-8")
-    line = next(l for l in text.splitlines() if l.strip().startswith("memory"))
+    line = next(lv for lv in text.splitlines() if lv.strip().startswith("memory"))
     assert "--candidates" not in line
     assert "--pending/--suspicious" in line
