@@ -8,7 +8,7 @@
     chat      Agent 形态：跑一个任务（--offline 时只做记忆管理与检索问答）
     replay    用记录重跑一个轨迹（不是播放录像）
     explain   解释某一步注入了什么、为什么没注入别的（含 top-50 审计候选）
-    memory    list／pending／candidates／review（--candidates/--pending/--suspicious；默认视图= candidates，将弃用）／off
+    memory    list／pending／candidates／review（--pending/--suspicious；review 无参=candidates 弃用别名，请用 candidates）／off
     learning  off／on（学习开关）
 
 设计纪律：不弹窗、不抢焦点；所有输出走 stdout/stderr，长任务写文件而不是开窗口。

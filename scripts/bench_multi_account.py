@@ -29,12 +29,17 @@ for _k in ("HIPPOCAMPUS_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROP
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-import psutil  # noqa: E402  # 内存采样：psutil（可选依赖，缺装时提示）
+try:
+    import psutil  # noqa: E402  # 内存采样：已进 pyproject dev extras（C6 六轮）
+except ImportError:  # 非 dev 环境缺装：内存读数恒 0（峰值行如实标 0），进程照跑
+    psutil = None  # type: ignore[assignment]
 
 from hippocampus.core import MemoryCore, Scope  # noqa: E402
 
 
 def _rss_bytes() -> int:
+    if psutil is None:
+        return 0
     return int(psutil.Process().memory_info().rss)
 
 
