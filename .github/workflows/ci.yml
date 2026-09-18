@@ -66,6 +66,18 @@ jobs:
           hippocampus --account ci demo --questions 10 --memories --json demo.json
           python -c "import json,sys; d=json.load(open('demo.json',encoding='utf-8')); a={x['name']:x for x in d['arms']}; on=a['记忆开']['passed']; off=a['记忆关']['passed']; print('记忆开',on,'/10  记忆关',off,'/10'); sys.exit('阈值断言失败：记忆开 %s<9 或 记忆关 %s>6' % (on,off)) if (on<9 or off>6) else print('阈值断言通过')"
 
+      - name: 候选集哨兵（消融脚本小样本口径＋阈值断言）
+        # 哨兵（A5/六轮 G8）：全开档证据命中低于阈值 → 红（召回退化会被 CI 抓到）。
+        # 口径：CI 无网、零下载 → 词法档 builtin-hash + 仓内 fixture（1 段对话 199 题）；
+        # 本机标定全开证据命中 31.66%（n=199，标准误 ±3.3pp）→ 阈值 25.0（留 ~2σ）。
+        # 全量档阈值 45.0 是神经档口径（本机跑），与 CI 档无关，见脚本 docstring。
+        run: |
+          python scripts/bench_ablation_channels.py \
+            --data tests/fixtures/locomo_conv26.json \
+            --convs 1 \
+            --home-root "${{ runner.temp }}/abl-ch-ci" \
+            --sentinel --sentinel-threshold 25.0
+
       - name: 示例库扫描（无个人数据、无真实记忆）
         run: python scripts/scan_personal_data.py --home "${{ env.HIPPOCAMPUS_HOME }}/accounts/ci"
 
