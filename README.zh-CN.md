@@ -44,17 +44,19 @@ Hippocampus 把"记忆"做成 agent 的核心能力，而不是外挂的检索�
 |---|---|---|---|
 | LongMemEval-oracle | LLM 判分准确率（官方 judge prompt） | **70.5%（63.8%–76.4%，Wilson）** | 抽 200 |
 | LoCoMo-10 | 官方 F1（Porter 词干词面，官方判分脚本） | **32.55%（30.8%–34.4%，bootstrap）** | 全量 1986 |
+| LoCoMo-10 + `--neighbors`（±1 轮扩展） | 同一个官方 F1 | **38.68%（36.8%–40.5%，bootstrap）** | 全量 1986 |
 
-同批检索口径（证据命中／答在文内）：LongMemEval **100.0%**／48.5%；LoCoMo **45.5%**／17.4%
-（神经嵌入档 `bge-small-en-v1.5`；默认零下载词法档 36.7%）。
+同批检索口径（证据命中／答在文内）：LongMemEval **100.0%**／48.5%；LoCoMo **45.5%**／17.4% 基线，
+**63.7%**／22.7% 为 `--neighbors` 扩展臂（神经嵌入档 `bge-small-en-v1.5`；默认零下载词法档 36.7%）。
 
 > **引用脚注（别省）**：作答输入＝记忆层 top-8 注入上下文，**不是全文**——与全文基线
 > 同表比必须带记录；官方判分要花 API 费用（预算硬停 ¥30 内置，每轮报告余额跑前/跑后）。
 > 完整数字、分类表、CI 方法、花费与复跑命令见 `docs/benchmark.md` 与 `docs/roadmap.md`。
 
 性能（真实运行库同规模合成库：1154 记忆／2406 实体／6035 关系／497 事件）：
-四通道检索 p50 **43.7 ms**／p95 55.1 ms；注入装配 p50 106.8 ms；单条写入 p50 632.8 ms
-（全量索引同步——已知瓶颈，见 `docs/roadmap.md`）。
+四通道检索 p50 **48 ms**；注入装配 p50 109 ms；单条写入 p50 **42 ms**（增量索引同步，
+2026-09-18；修复前全量 re-sync 为 632.8 ms）。多账户长跑内存有界：会话缓存 LRU 上限可配，
+LongMemEval 神经档 200 账户峰值 RSS **~1.1 GB**（原 ~4 GB），证据命中仍 100%。
 
 ## 快速开始
 
@@ -153,7 +155,7 @@ export HIPPOCAMPUS_BASE_URL=https://api.deepseek.com   # 可选，也可写在 c
 ## 验证自己跑一遍
 
 ```bash
-python -m pytest tests/ -q            # 476 条（含模型臂 21 条；C 盘紧张时加 --basetemp=D:/tmp/pt）
+python -m pytest tests/ -q            # 511 条（含模型臂 21 条；C 盘紧张时加 --basetemp=D:/tmp/pt）
 python scripts/check_interface.py     # MemoryCore v1 契约（scope 第一参数／无 HTTP 字段／只追加）
 python scripts/audit_deps.py          # 依赖审计：全局单例残留必须为 0
 python scripts/scan_credentials.py    # 凭据扫描：零命中
@@ -202,10 +204,14 @@ docs/        接口冻结文档／命名实测／依赖审计／安全说明
 
 ## 状态与已知限制（如实）
 
-- **无 MCP / 第三方工具接入**（设计如此，正本写明）。
-- **无 `/run` `/trace` `/health` 服务**（路线图项；代理形态覆盖 OpenAI 兼容路径）。
-- **会话缓存无上界**：200 账户长跑常驻 ~4 GB（单机单会话不受影响；LRU 逐出在计划中）。
-- **单条写入触发全量索引同步**：1154 记忆规模 p50 632.8 ms（~1.5 条/秒）；增量 upsert 是计划修复。
+- **无 MCP / 第三方工具接入**（设计如此，正本写明）——指**消费**方向；兄弟项目 GitTok 对外**提供**
+  MCP server，与本合同无关，别混着读。
+- **管理口 `/run` `/trace` `/health` 已实现但只绑环回**（七轮 T3：`hippocampus serve`；带实例令牌；
+  与代理形态同一端口，一次只起一个）。
+- **会话缓存有 LRU 上限**（`HIPPOCAMPUS_SESSION_CACHE_MAX`，默认 16）：常驻内存有界（~1.1 GB），
+  代价是被逐出的账户下次访问要重开会话。
+- **单条写入走增量索引同步**：1154 记忆规模 p50 **42 ms**（修复前全量 re-sync 为 632.8 ms）；
+  残余风险＝并发写入下索引与库可能出现差异，由 `index_health` 与 `hippocampus index rebuild` 兜底。
 - **英文语料 × 中文标定**分词／阈值：英文基准绝对分低于英文原生系统（逐基准有注）。
 - **官方判分为单模型单次测量**（deepseek-chat；答辩引用必须带"top-8 注入、非全文"脚注）。
 - **命名**：PyPI 分发名是 `hippocampus-agent`（见上）。

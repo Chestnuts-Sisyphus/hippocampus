@@ -221,6 +221,54 @@ LME 200 题三臂对照（同数据同代码同嵌入，离线）：fresh home A
 **不是批次/数据/嵌入变量**。测量纪律：**官方分与检索口径的基准数字以 fresh 库第一次跑为准**；
 复跑必须清 home（`run-*` 目录不复用）。
 
+### 二·八 cat3 开放域低分归因（七轮 T8，2026-09-19 · **零新花费**）
+
+本轮评测批次冻结，所以这里**不重跑模型**——只读已付过费的两份官方判分产物
+（`loco_official_full.json` 基线臂／`loco_nb_official.json` ±1 轮邻居臂）＋数据集本身，
+按 `qid` 逐题配对。方法沿用 §二·四 的 cat5 归因。
+
+| 口径 | cat3（开放域，n=96）平均官方分 |
+|---|---|
+| 基线臂（top-8 注入） | **13.91%** |
+| 邻居臂（`--neighbors`） | **12.25%** |
+
+**配对结果**：0→1 共 3 题、1→0 共 3 题、**两臂都不过 83/96**。
+→ 邻居扩展对 cat3 **没有方向性作用**（涨跌对称），且短板是**稳定**的、不是抖动。
+
+**机理拆分**（以基线臂不过的 86 题为样本）：
+
+| 观察 | 数量 | 读法 |
+|---|---|---|
+| 作答为空（模型没给内容） | **0/86** | 记忆层**没有交白卷**：证据基本都给到了注入位 |
+| 金标是多项／含逗号（须并列全对） | 22/86 | 例：金标 `Psychology, counseling certification`，模型答 `Helping others` |
+| 金标是长句（词面 F1 天然吃亏） | 25/86 | 例：`Yes, since she collects classic children's books` vs 模型只答 `Yes` |
+| 模型作答极短（≤2 词） | 29/86 | 短判定词题被答成解释句、或解释句被答成短语 |
+| 证据条数分布 | 1 条 39、2 条 23、3 条 9、4 条 8、**0 条 4** | 4 题数据集本身没标证据（无依据可召回） |
+
+样例（截断）：
+
+```
+conv-26-q14  金标: Likely no            模型: Yes, passionate about creating a safe, inviting place…
+conv-26-q30  金标: Likely no, she does not refer to herself as part of it   模型: Yes   （证据 0 条）
+conv-26-q50  金标: Liberal               模型: Standing up for equality
+conv-26-q59  金标: Somewhat, but not extremely religious   模型: Not enough information to answer.
+```
+
+**结论（机理，不是提分方向）**：cat3 是**开放域推断题**（"Would X likely…"），金标常是一个
+**短判定词**（`Likely no`／`Liberal`／`Somewhat`），而模型按注入证据作答时给出的是**解释性表述
+或近义短语**——官方指标是 **Porter 词干后的词面 token-F1**，语义对、词面不对就判 0。
+所以 cat3 的低分主要是**判据口径 × 题型**的错配，而非记忆层召回失效（0 空答是最直接的证据）。
+要真提这一档，得换判据（cat3 用 LLM 判分）或做英文原生适配——**两者都属"提分方向"，本轮不做**。
+
+> **口径订正（同日记）**：`CHANGELOG.md` [0.3.0] 里"cat3 开放域（12.25%）"是**邻居臂**的值，
+> 基线臂是 13.91%（正本 §分类表 13.9% 与之一致）。引用时请带臂名，两个数不是同一次运行。
+
+复跑（只读，零出站）：
+
+```bash
+python scripts/bench_cat_attrib.py --category 3 --json D:/tmp/hc7/cat3.json
+```
+
 ## 三、口径（写在表头上，别让读者猜）
 
 | 项 | 本项目怎么算 |

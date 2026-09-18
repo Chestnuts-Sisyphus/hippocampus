@@ -127,4 +127,4 @@ hippocampus explain --run <轨迹名>          # 候选全集 + 被剔理由
 端口/代理不受影响；`alert` 类错误会进自己的日志目录（见 §④），照日志追即可。
 
 **纪律**：key 字面量只存在于环境变量/密钥服务/密钥管理文件；仓库内 `scripts/scan_credentials.py`
-零命中是发布门槛（当前 141 文件零命中）。
+零命中是发布门槛（tracked 树零命中；扫描覆盖面以实跑 `scripts/scan_credentials.py` 的输出为准）。

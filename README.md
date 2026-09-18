@@ -141,12 +141,12 @@ memory writes are safe-ident/safe-DDL checked, and offline mode means *no outbou
 
 ## 🧪 Tests & CI
 
-- **476 pytest tests** (3 xfailed) — memory core, both forms, guards, embedding tiers, public-bench
+- **511 pytest tests** (3 xfailed) — memory core, both forms, guards, embedding tiers, public-bench
   adapters, official judging arm; all offline-runnable (`pytest --basetemp=D:/tmp/pt`).
 - Demo eval runs in CI with **threshold assertions** (memory on ≥9/10, memory off ≤6/10) — score
   regressions turn the pipeline red.
 - Static checks: `check_interface` (v1 contract append-only), `audit_deps`, `scan_credentials`
-  (zero credential literals over 141 files), `scan_personal_data`, `ruff`.
+  (zero credential literals across the tracked tree), `scan_personal_data`, `ruff`.
 
 ---
 
@@ -176,10 +176,15 @@ What works today: two production-shaped consumption forms, real retrieval pipeli
 benchmarks with official judging, performance at real-store scale, and CI-enforced regression
 thresholds. What is *not* there — so nobody reads more into the repo than it delivers:
 
-- **No MCP / third-party tool integration** (by design; the design doc says so).
-- **No `/run` `/trace` `/health` service** (roadmap item; proxy form covers the OpenAI-compatible path).
-- **Session cache is unbounded** — ~4 GB resident at 200 accounts on LongMemEval-style one-account-per-question runs (single-user, single-session is unaffected; LRU eviction is planned).
-- **Single `write` triggers a full index sync** — p50 632.8 ms (~1.5 writes/s) at 1,154-memory scale; incremental upsert is the planned fix.
+- **No MCP / third-party tool integration** (by design; the design doc says so — this is the
+  *consuming* direction; the sibling GitTok project *provides* an MCP server, which is unrelated).
+- **Management endpoints `/run` `/trace` `/health` exist but bind loopback only** (round-7 T3:
+  `hippocampus serve`; instance-token auth; same port as the proxy form so you run one at a time).
+- **Session cache is LRU-capped** (`HIPPOCAMPUS_SESSION_CACHE_MAX`, default 16): bounded RSS
+  (~1.1 GB at 200 accounts) but evicted accounts reopen their session on next access.
+- **Single `write` uses incremental index sync** — p50 **42 ms** at 1,154-memory scale (was
+  632.8 ms with full re-sync); residual risk is index/library divergence under concurrent writers,
+  covered by `index_health` + `hippocampus index rebuild`.
 - **English corpus × CN-tuned tokenizer/thresholds** — absolute retrieval scores on English benchmarks are lower than an EN-tuned system would score (documented per-benchmark).
 - **Official judging costs API tokens** and is an explicit opt-in flag; every run prints call counts, estimated cost, and balance before/after (¥30 budget hard-stop).
 - **Naming**: PyPI distribution name is `hippocampus-agent` (see above).

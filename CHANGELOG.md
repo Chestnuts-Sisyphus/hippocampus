@@ -3,6 +3,67 @@
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)；
 `MemoryCore` 接口自 v1 起**只允许追加字段**（见 `docs/memory-core-v1.md`）。
 
+## [Unreleased] — 七轮（工程完善轮，2026-09-19 起）
+
+> 本段随**下一个 tag** 发布；`v0.3.0`（→`5f154a5`）不移动。本轮**评测批次冻结**（零新花费）。
+
+模型层（T1 换型 · 复测后关闭）：
+
+- 按拍板执行换型前置流程：`scripts/calibrate.py` 重标定中文档 → 正样本 0.5255–0.6293／
+  负样本 0.2568–0.4043（**两分布可分**，建议 `answer_floor` 0.465，旧表值 0.55 系前身报告、
+  高于实测正样本最小值已替换）；
+- 真机回归（CI 同口径阈值断言）：中文档 demo 10 题＝记忆开 **8/10**（内置档 10/10），
+  **未过 ≥9/10 闸 → 按护栏不换型**，负面实测如实入 `docs/embedding.md` §七轮换型实测；
+- **修掉一处会让"换型"整体失效的漂移**：文档与档位表都写裸名 `onnx:bge-small-zh-v1.5`
+  （合法仓库名带 `Xenova/` 前缀）→ 下载 401 **静默回退 MiniLM**，且 `apply_tier_params()`
+  查不到表键 → **整档参数不生效**。表键改合法仓库名、文档改口径、未标定档显式登记
+  `calibration.UNCALIBRATED_TIERS` 并加 stderr 告警，配守护测试
+  `tests/test_n29_r7_model_tier.py`。
+
+记忆层（T2 可求证机制，正本 §三-4 施工）：
+
+- 新模块 `memory/verification.py`：L1 存在性·自洽（路径／URL／日历日／百分数）＋
+  L2 库内一致性 ＋ L3 外站探测（**默认关**，开了才出站）；三态处置——`verified` 直存留证据、
+  `refuted` 用户来源挂起询问不静默丢／模型来源丢弃＋观察日志留痕、`unverifiable` 直存不打可疑；
+- `memories` 追加四列（全带默认值，`check_interface.py` 的 v1 只追加契约成立）；
+  开关 `verification_enabled`（默认开）／`verification_external`（默认关）；
+- 观察轨那条前身幻觉判据收敛到同一入口；
+- 附带修掉一处建库漂移：账户库的迁移序列在 `memory_bridge` 里另抄了一份，新增列/参数
+  只在一处生效 → 统一为 `database.apply_migrations()` 单一入口。
+- 验收锚点 A42–A45：`tests/test_n30_r7_verification.py`。
+
+形态层（T3 服务化 E1）：
+
+- `hippocampus serve` 管理口三端点：`POST /run`（跑一轮注入＋固化，回 `run_id`）／
+  `GET /trace?run_id=`（取该次注入的全链路审计＋观察事件）／`GET /health`（补索引健康）；
+- 默认只绑 127.0.0.1＋实例令牌，非环回必须 `--allow-remote` 且强制有令牌；零出站。
+  验收：`tests/test_n31_r7_serve.py`（真 uvicorn）。
+
+治理（T5 真机验收）：
+
+- 新增 `scripts/live_supersede_probe.py`：真机变更句实测（不钉桩、按对隔离账户、
+  覆盖 supersede／admit／挂起确认三条去路，并断言"改口后注入取到新值"）；
+  三档实测对照记入 `docs/embedding.md`。
+
+文档一致性与仓库卫生（T7／T8／T11）：
+
+- README 双语测试数按实测改 **476 → 511**（本轮新增 35 条用例），并加**守护测试**：
+  `tests/test_n32_r7_docs_drift.py` 钉住"README 声明数 == `pytest --collect-only` 真值"
+  （**双语两处都查**）、双语头牌数字同源、roadmap 旧口径表必须带标注；
+- `docs/roadmap.md` §6.1 性能表加**「旧口径：全量 re-sync，修复前」**题注并指向现行
+  增量口径（42.0 ms）；§五 那行"增量 upsert 本轮未做"订正为已解决（与 [0.3.0] 一致）；
+- **中文 README 三处过期口径订正**（v0.3.0 只改了英文版）：性能数字改成发布口径
+  （检索 48 ms／注入 109 ms／写入 42 ms／峰值 ~1.1 GB）、基准表补 `--neighbors` 的
+  38.68% 行、"已知限制"里"无管理口／缓存无上界／写入全量同步"三条改为与实现一致；
+- 去掉文档里会随提交漂移的硬编码扫描文件数（README／`docs/security.md` 改记"tracked 树零命中"）；
+- **cat3 低分归因（§二·八，零新花费）**：只读既有官方判分 JSON 配对分析——
+  基线臂 13.91%／邻居臂 12.25%，两臂都不过 83/96，**空作答 0 例**；
+  机理＝开放域推断题的短判定词金标 × 词面 token-F1 判据的口径错配，不是记忆层召回失效；
+  顺带订正 [0.3.0] 段"cat3 12.25%"未标臂的引用；
+- `uv.lock` 入库（可复现安装；实测无个人绝对路径／无凭据字面量，CI 仍走 `pip install -e`，不受影响）。
+
+
+
 ## [0.3.0] — 2026-09-19
 
 第五与第六轮（T2–T14 / G4–G10）的集中发版，共 18 个提交：性能、评测可信度、
@@ -41,7 +102,7 @@
   `docs/deployment.md`、`docs/release-sync.md`（F1/F2 同步纪律）；
 - 版本三方不一致（pyproject 0.2.1 / tag v0.2.2 / CHANGELOG）随本段归一为 **0.3.0**。
 
-诚实限制：cat3 开放域（12.25%）与多跳仍是短板；官方分为抽样/单机口径，不作普适承诺；
+诚实限制：cat3 开放域（邻居臂 12.25%／基线臂 13.91%，口径见 `docs/benchmark.md` §二·八）与多跳仍是短板；官方分为抽样/单机口径，不作普适承诺；
 `bge-small-zh` 中文端到端实测不优于默认档（未过 CI 开 ≥9/10 阈值）；评估数据"优化"暂停纪律继续有效。
 
 ## [0.2.2] — 2026-09-18
