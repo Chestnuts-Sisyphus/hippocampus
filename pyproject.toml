@@ -9,7 +9,7 @@ build-backend = "hatchling.build"
 #      写它会让 `pip install hippocampus` 装到第三方的东西（见 docs/naming.md 实测）；
 #   ② 分发名只在 `pip install` / `pip show` 出现，不影响项目名与命令行。
 name = "hippocampus-agent"
-version = "0.2.1"
+version = "0.3.0"
 description = "以记忆为核心的 agent 运行时：记忆核心 + 代理形态 + Agent 形态"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -49,7 +49,7 @@ all = [
   "uvicorn>=0.27",
   "langchain-openai>=0.2",
 ]
-dev = ["pytest>=8.0", "ruff>=0.6", "psutil>=5.9"]
+dev = ["pytest>=8.0", "ruff>=0.6", "psutil>=5.9", "nltk>=3.8"]  # nltk：官方判分口径的 Porter 词干，CI 跑 test_n22 需要
 
 [project.scripts]
 hippocampus = "hippocampus.cli:main"

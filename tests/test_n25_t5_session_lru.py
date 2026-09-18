@@ -79,7 +79,10 @@ def test_lru_never_evicts_in_use_session(home, monkeypatch):
     def holder():
         with session.lock:
             entered.set()
-            release.wait(timeout=5)
+            # 不带超时：主线程 finally 必置 release。旧写法 timeout=5 在慢机
+            # （CI Windows runner 开 4 个账户的写路径 >5s）会提前放锁，
+            # LRU 把"正在使用"的会话逐出——假红而非产品缺陷。
+            release.wait()
         entered.clear()
 
     t = threading.Thread(target=holder)
