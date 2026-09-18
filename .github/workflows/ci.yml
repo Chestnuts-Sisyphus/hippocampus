@@ -25,6 +25,9 @@ jobs:
       # 任何"偷偷需要模型"的代码路径都会在这里失败。
       HIPPOCAMPUS_OFFLINE: "1"
       HIPPOCAMPUS_HOME: ${{ github.workspace }}/_ci_home
+      # Windows runners use a cp1252 console; without this, printing Chinese
+      # from inline `python -c` raises UnicodeEncodeError (offline-smoke step).
+      PYTHONIOENCODING: "utf-8"
     steps:
       - uses: actions/checkout@v4
 
