@@ -57,6 +57,22 @@ def _new_run_id() -> str:
     return f"{int(time.time() * 1000)}-{next(_INJECT_SEQ)}"
 
 
+def _episode_duplicate(conn: sqlite3.Connection, session_id: str, role: str, text: str) -> bool:
+    """经历层精确去重（C1 六轮）：同会话同角色、内容规范化相等的经历视为重复。
+
+    与 `dedup.find_exact_duplicate` 同一规范化口径（NFKC+剔标点+压空白），
+    用于 ingest_history 重复导入幂等——不做排除会话（批量导入要的就是全局判重）。
+    """
+    norm = dedup.normalize_content(text)
+    if not norm:
+        return True
+    rows = conn.execute(
+        "SELECT content FROM episodes WHERE session_id=? AND role=?",
+        (session_id, role),
+    ).fetchall()
+    return any(dedup.normalize_content(r["content"] or "") == norm for r in rows)
+
+
 class MemoryCoreError(RuntimeError):
     """记忆核心的显式错误（scope 非法 / 库不可用等）。"""
 
@@ -177,6 +193,12 @@ class MemoryCore:
                     session.lock.release()
                 self._sessions.pop(victim, None)
                 self._session_last_used.pop(victim, None)
+                # C2（六轮）：连带逐出该账户的 WriterLock——会话都关了还留着锁对象
+                # 只占内存（多账户 2.6 万级时无界积累）；本地未持有才删
+                # （持有中＝另一个线程正在该账户做读写，保留对象等它用完）。
+                lock = self._locks.get(victim)
+                if lock is not None and not lock.held_locally():
+                    self._locks.pop(victim, None)
                 evicted += 1
         return evicted
 
@@ -252,13 +274,15 @@ class MemoryCore:
         （缺省=None，行为与旧版完全一致）。
         `sync=True` 时导入完统一同步一次向量索引 + 重建 BM25（**批内不逐条同步**——
         逐条同步会让导入退化成 O(n²)）。
-        返回 `{"episodes": n, "memories": n}`。
+        **C1（六轮）去重**：两个池各自按"内容规范化相等"判重——同一批历史重复导入
+        只入一次（记忆按 `dedup` 全库口径；经历按同会话同角色规范化文本相等），
+        返回 `{"episodes": n, "memories": n, "skipped": n}`（skipped=两池都重复被跳过的轮）。
         """
         scope = _as_scope(scope)
         session = self._session(scope)
         from hippocampus.memory import database as db
 
-        ep_count = mem_count = 0
+        ep_count = mem_count = skip_count = 0
         with self._lock(scope.account).held(), session.lock:
             for turn in turns or []:
                 text = str((turn or {}).get("text") or "").strip()
@@ -286,8 +310,18 @@ class MemoryCore:
                         )
                 want_ep = bool(turn.get("as_episode", True))
                 want_mem = bool(turn.get("as_memory", as_memories))
+                # C1（六轮）：ingest_history 精确去重——同一批历史重复导入只入一次
+                # （磨平 T10 教训：复用 home 重跑会滚大库污染数字）。两个池各自判重：
+                # 记忆按规范化相等（dedup 同款口径），经历按（会话, 角色, 规范化文本）
+                # 三元组；本轮两池都重复才算跳过——as_memory/as_episode 开关跨批变化时，
+                # 没重复的那个池照常落。
+                ep_dup = want_ep and _episode_duplicate(session.conn, sid, role, text)
+                mem_dup = want_mem and dedup.find_exact_duplicate(session.conn, "fact", text) is not None
+                if ep_dup and mem_dup:
+                    skip_count += 1
+                    continue
                 pid = ""
-                if want_ep:
+                if want_ep and not ep_dup:
                     pid = db.add_episode(
                         session.conn,
                         sid,
@@ -298,7 +332,7 @@ class MemoryCore:
                         security_flag=0,
                     )
                     ep_count += 1
-                if want_mem:
+                if want_mem and not mem_dup:
                     db.add_memory(
                         session.conn,
                         "fact",
@@ -311,7 +345,7 @@ class MemoryCore:
             session.conn.commit()
             if sync:
                 self._reindex(session)
-        return {"episodes": ep_count, "memories": mem_count}
+        return {"episodes": ep_count, "memories": mem_count, "skipped": skip_count}
 
     def write(
         self,

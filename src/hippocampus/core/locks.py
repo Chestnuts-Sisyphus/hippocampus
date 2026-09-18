@@ -103,6 +103,11 @@ class WriterLock:
         finally:
             handle.close()
 
+    def held_locally(self) -> bool:
+        """本进程当前是否持有（重入计数 > 0）。LRU 逐出时用来判断锁对象能否删。"""
+        with self._guard:
+            return self._depth > 0
+
     def is_stale(self, *, stale_after_s: float = DEFAULT_STALE_S) -> bool:
         """锁文件存在但无人持锁、且心跳过期 → 视为僵尸锁。"""
         if not self.path.exists():
