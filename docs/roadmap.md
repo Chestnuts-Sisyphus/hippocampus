@@ -55,7 +55,7 @@
 | ~~无版本标签~~ | **已解决**：`v0.2.0` tag＋Release（见 GitHub Releases） | — |
 | 未发布 PyPI | 安装走 GitHub 直装 / 源码；分发名 `hippocampus-agent` 已在 PyPI 占位可用 | `pip install` 装不到 |
 | ~~无导入/导出命令~~ | **已解决（0.2.0）**：`hippocampus export <目录>` / `import <目录>`（目录包含 manifest 与 schema 版本；导入默认不覆盖，`--force` 时旧库留 `.bak` 副本） | — |
-| 演示脚本 | `scripts/demo.sh`／`scripts/demo.ps1`（起代理→灌数据→三格式请求→评测→结果表）；**两版均已实测（2026-09-18）**：`demo.ps1` 修了无 BOM 导致 PowerShell 按 ANSI 解析中文串报语法错的问题（已带 UTF-8 BOM），之后五段全通（doctor→seed→代理 8765→三格式请求→20 题评测 开 20/20／关 6/20／基线 18/20） | 换系统区域设置（非简体中文）时仍需 BOM 保障 |
+| 演示脚本 | `scripts/demo.sh`／`scripts/demo.ps1`（起代理→灌数据→三格式请求→评测→结果表）；**两版均已实测（2026-09-18）**：`demo.ps1` 修了无 BOM 导致 PowerShell 按 ANSI 解析中文串报语法错的问题（已带 UTF-8 BOM），之后五段全通（doctor→seed→代理 8765→三格式请求→20 题评测 开 20/20／关 6/20／基线 18/20）；**跨会话长任务演示（六轮 G7，2026-09-18）**：`scripts/demo_flow.py` 一键走完三形态（记忆核心/Agent/代理）＋跨会话记忆生效断言（会话 A 写入→会话 B/Agent/代理均复述），4 断言全过（exit 0，离线零凭据，输出样例见结果文档 §十一） | 换系统区域设置（非简体中文）时仍需 BOM 保障 |
 | **单条写入随库规模线性变慢** | 每次 `write` 触发**全量**索引同步：1154 记忆规模下 p50 **749 ms**／1.32 条/秒（`scripts/bench_scale.py` 实测） | 会话里每轮多几次写入即可感知；改进方向＝**增量 upsert**（只同步变化行），本轮未做（改动面大、需重新标定） |
 
 ## 六、实测数字（2026-09-17 · 本机 AMD 7500F／Windows／Python 3.11）

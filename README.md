@@ -85,6 +85,7 @@ pip install "hippocampus-agent[vector,proxy] @ git+https://github.com/Chestnuts-
 hippocampus doctor                     # health check: data root / port / locks / index / embedding tier
 hippocampus seed                       # load sample data (known ground truth: facts, conflicts, stale items)
 hippocampus demo --memories            # one-command eval + memory on/off comparison
+python scripts/demo_flow.py            # cross-session long-task demo: 3 forms + memory-across-sessions asserts
 ```
 
 > **Naming note.** The project, CLI and import package are all `hippocampus`; only the **PyPI
