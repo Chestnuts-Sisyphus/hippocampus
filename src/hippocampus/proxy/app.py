@@ -300,15 +300,39 @@ def build_app(core: MemoryCore, *, confirm_block: bool = True, offline: bool = F
             return JSONResponse(status_code=400, content={"error": {"message": "缺少 text（这一轮的输入）"}})
         scope = _scope_from(dict(request.headers))
         injection = core.inject_finalize(scope, text)
-        turn = core.consolidate(scope, user_text=text, assistant_text=str((body or {}).get("assistant_text") or ""))
+        injected = [
+            {"id": i.id, "kind": i.kind, "content": i.content, "score": round(i.score, 4)} for i in injection.items
+        ]
+        dropped = [{"id": d.id, "reason": d.reason, "stage": d.stage} for d in injection.dropped]
+        try:
+            turn = core.consolidate(
+                scope, user_text=text, assistant_text=str((body or {}).get("assistant_text") or "")
+            )
+        except Exception as e:
+            # 固化阶段的抽取会按当前配置用模型端点（有凭据即出站）；端点报错不能让整条
+            # 链路裸 500——回 502 并带上**已完成的注入结果**，让调用方看得懂断在哪一段。
+            return JSONResponse(
+                status_code=502,
+                content={
+                    "error": {
+                        "message": (
+                            f"注入已完成、固化未完成：抽取阶段的模型端点调用失败（{type(e).__name__}）。"
+                            "管理口不转发对话上游，但记忆抽取按配置使用模型端点；配不到可用端点时走规则档。"
+                        ),
+                        "stage": "consolidate",
+                    },
+                    "run_id": injection.run_id,
+                    "scope": {"account": scope.account, "session": scope.session},
+                    "injected": injected,
+                    "dropped": dropped,
+                    "note": injection.note,
+                },
+            )
         return {
             "run_id": injection.run_id,
             "scope": {"account": scope.account, "session": scope.session},
-            "injected": [
-                {"id": i.id, "kind": i.kind, "content": i.content, "score": round(i.score, 4)}
-                for i in injection.items
-            ],
-            "dropped": [{"id": d.id, "reason": d.reason, "stage": d.stage} for d in injection.dropped],
+            "injected": injected,
+            "dropped": dropped,
             "note": injection.note,
             "written_ids": list(turn.write.ids),
             "observed_ids": list(turn.observed_ids),

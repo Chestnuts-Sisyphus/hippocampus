@@ -13,7 +13,7 @@
 | ~~工具调用（function calling）未联调~~ | **已解决（0.2.1）**：chat／anthropic／responses **三向都带 `tools` 真服务端到端**（`tests/test_n15_proxy_tools.py`） | — |
 | ~~代理 session 分桶不可配~~ | **已解决（0.2.1）**：`proxy.session_bucketing`＝`day`（默认）／`hour`／`none`（不分桶）；显式传 session 头仍以客户端为准 | — |
 | ~~`/v1/models` 只回占位名~~ | **已解决（0.2.1）**：回**配置的模型名**（`llm.model`／`HIPPOCAMPUS_MODEL`），未配置才回内置名 | — |
-| ~~服务化没有管理口（E1）~~ | **已解决（七轮 T3，随下一个 tag 发）**：`hippocampus serve` 起管理口，三端点 `/run`（执行一轮注入＋固化，回 `run_id`）／`/trace?run_id=`（取该次注入的全链路审计）／`/health`（索引与库健康）。**默认只绑 127.0.0.1＋实例令牌**；要出网卡必须显式 `--allow-remote`，无令牌则拒起 | 与代理形态同一端口（二择一起动）；不起上游转发，零出站。用法见 `docs/deployment.md` §二·五 |
+| ~~服务化没有管理口（E1）~~ | **已解决（七轮 T3，随下一个 tag 发）**：`hippocampus serve` 起管理口，三端点 `/run`（执行一轮注入＋固化，回 `run_id`）／`/trace?run_id=`（取该次注入的全链路审计）／`/health`（索引与库健康）。**默认只绑 127.0.0.1＋实例令牌**；要出网卡必须显式 `--allow-remote`，无令牌则拒起 | 与代理形态同一端口（二择一起动）；**不起上游转发**（不把这一轮话转给模型作答），但固化阶段的记忆抽取按配置使用模型端点（可用即出站、仅 https，配不到走规则档）——真机实测订正见 `docs/deployment.md` §二·五第 3 条。用法见 `docs/deployment.md` §二·五 |
 | E2（"要不要做 MCP 工具接入"）口径 | **已消解，非缺口（七轮 B1 拍板登记）**：GitTok 线 09-17 上线的 llms.txt＋MCP server 是**对外提供**方向；Hippocampus 正本 §一"不做 MCP 工具接入"说的是**消费**方向（不通过 MCP 接第三方工具）。两句方向相反、不冲突，Hippocampus 侧口径维持不变 | 记录用途：防止以后有人拿 GitTok 的 MCP 反过来说本项目"缺服务化" |
 
 ## 二、记忆层

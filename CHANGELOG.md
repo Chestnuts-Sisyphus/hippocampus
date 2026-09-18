@@ -36,8 +36,14 @@
 
 - `hippocampus serve` 管理口三端点：`POST /run`（跑一轮注入＋固化，回 `run_id`）／
   `GET /trace?run_id=`（取该次注入的全链路审计＋观察事件）／`GET /health`（补索引健康）；
-- 默认只绑 127.0.0.1＋实例令牌，非环回必须 `--allow-remote` 且强制有令牌；零出站。
+- 默认只绑 127.0.0.1＋实例令牌，非环回必须 `--allow-remote` 且强制有令牌。
+  **出站口径（09-19 真机实测订正）**：管理口**不把这一轮话转发给上游作答**，但 `/run` 的固化阶段
+  会按当前配置调用模型端点做记忆抽取（可用即出站、仅 https；配不到走规则档，CI 即靠这条）。
   验收：`tests/test_n31_r7_serve.py`（真 uvicorn）。
+- **收口后真机冒烟修掉一处**：机器上存着失效模型凭据时，`/run` 的抽取异常会直穿 ASGI 变**裸 500**
+  （调用方看不到断在哪一段）→ 现兜底为 **502** 并回带已完成的注入结果（`run_id`／`injected`／
+  `dropped`／`note`），回归测试 `test_run_degrades_to_502_when_consolidation_fails`；
+  这条是 pytest 全绿状态下由"真起 uvicorn＋真发 HTTP"才暴露的（测试数 515→**516**）。
 
 治理（T5 真机验收）：
 

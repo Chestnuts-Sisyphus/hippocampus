@@ -39,7 +39,12 @@ hippocampus serve --host 0.0.0.0 --allow-remote   # 显式承认要出网卡（�
 1. **只绑环回**。传非环回 `--host` 必须同时给 `--allow-remote`，否则拒起（退出码 2）；
    非环回还必须有实例令牌，拿不到令牌文件同样拒起——管理口能写记忆，裸奔到局域网不可接受。
 2. **鉴权与代理形态同一条**：`Authorization: Bearer <instance_token>`；缺令牌 401。
-3. **不出站**：服务形态起的是离线档（`upstream=None`），`/run` 只读写本机记忆库。
+3. **不转发对话上游 ≠ 零出站**（09-19 真机实测订正）：服务形态起的是离线档（`upstream=None`），
+   **不会把用户这轮话转给模型去作答**；但 `/run` 的**记忆固化**仍按当前配置调用模型端点做抽取——
+   配到可用端点就出站（**仅 https**），配不到就走规则档（CI 正是靠这条不依赖任何 key）。
+   真机踩到的原样：机器上存着失效 key 时，`/run` 曾以 ASGI **500** 崩在抽取那一步；
+   现在兜底为 **502**，并在响应里带上**已完成的注入结果**（`run_id`／`injected`／`dropped`／`note`），
+   断在哪一段一眼可见（回归测试 `tests/test_n31_r7_serve.py`）。
 
 ```bash
 TOKEN=$(cat ~/.hippocampus/instance_token)

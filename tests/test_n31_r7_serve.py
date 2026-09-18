@@ -129,3 +129,28 @@ def test_management_port_refuses_non_loopback_by_default(tmp_path, capsys):
     rc = serve_management(host="0.0.0.0", port=_free_port(), home=tmp_path / "h")
     assert rc == 2
     assert "只绑环回" in capsys.readouterr().out
+
+
+def test_run_degrades_to_502_when_consolidation_fails(core, served, monkeypatch):
+    """真机冒烟（09-19）钉住的缺陷：机器上存着失效模型凭据时，`/run` 的固化阶段会抛异常。
+
+    旧行为：异常直穿 ASGI → 裸 500，调用方看不到断在哪一段；
+    现在：**502** ＋ 已完成的注入结果（`run_id`／`injected`／`dropped`）一起回。
+    """
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("401 Authorization Required for url 'https://api.example.com'")
+
+    monkeypatch.setattr(core, "consolidate", boom)
+    base, headers, scope = served
+    resp = httpx.post(
+        f"{base}/run",
+        headers={**headers, "content-type": "application/json", "X-Hippocampus-Account": scope.account},
+        json={"text": "我找岗位时有哪些硬性限制？"},
+        timeout=20,
+    )
+    assert resp.status_code == 502, f"固化失败不该裸 500：{resp.status_code} {resp.text[:200]}"
+    body = resp.json()
+    assert body["error"]["stage"] == "consolidate"
+    assert body["run_id"], "502 也得把已完成的注入段 run_id 回出来"
+    assert "injected" in body and "dropped" in body
