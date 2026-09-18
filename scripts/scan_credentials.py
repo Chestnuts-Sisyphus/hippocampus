@@ -39,7 +39,9 @@ CREDENTIAL_PATTERNS = [
 
 # 明确的占位符（允许出现，但行内必须自带"这是假的"的意思）
 PLACEHOLDER_PATTERN = re.compile(r"(placeholder|test|fake|dummy|example|xxx|not-a-real)", re.IGNORECASE)
-SHORT_SECRET_SHAPE = re.compile(r"sk-[A-Za-z0-9]{6,}")
+# `\b` 不能省：没有词首边界时 `task-overlay` 里的子串（形如 sk-xxxxxxx）会被判成密钥字面量
+# （七轮 T9 实测到的假报警，落在另一会话的交接文档上）。真密钥都是独立串，词首边界不降召回。
+SHORT_SECRET_SHAPE = re.compile(r"\bsk-[A-Za-z0-9]{6,}")
 
 
 

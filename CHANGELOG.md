@@ -62,6 +62,24 @@
   顺带订正 [0.3.0] 段"cat3 12.25%"未标臂的引用；
 - `uv.lock` 入库（可复现安装；实测无个人绝对路径／无凭据字面量，CI 仍走 `pip install -e`，不受影响）。
 
+安全面（T6 六轮 D5 欠账）：
+
+- **Mimosa 正式 seal 本机仍不可跑**（命令面无该工具，它是 ZCode 侧 PreToolUse 钩子），
+  如实维持**替代 seal**并重新量一遍：`pip-audit` 联网 OSV 复扫 132 包（命中仍是 `chromadb` 5 条
+  ＋ `nltk` 1 条，与 09-18 同批、使用面不可达）＋ tracked 树凭据零命中 ＋ CI 全绿，
+  记入 `docs/dependency-audit.md` §六（含"Mimosa 可用时必须复扫替换本节"的待办口径）。
+
+凭据卫生（T9）：
+
+- `.qoder/handoff/PROMPTS.md:925` 经复核是**扫描器误报**（命中的是普通词 `task-overlay` 里的
+  子串），没有真凭据可打码 → 修的是判据：`scan_credentials.py` 短密钥形状规则补词首边界 `\b`，
+  并补两侧对照测试 `tests/test_n33_r7_scan_credentials.py`（真 key 形态必命中／普通词与占位行不误报／
+  整仓 tracked 零命中）；
+- KEY 母库 `D:/AI/KEY/GITHUB-TOKENS.txt` 以**文末登记表**方式逐把补注 scope 能力面
+  （既有行一字未改，`git-askpass` 垫片取第 2 行长度复核仍是 93 字符，不影响任何按行号取值的读取方）；
+- 顺带测得一条硬边界：**在册凭据没有一把带 `delete_repo`**，删仓需 owner 网页端操作
+  （T4 安全闸已通过但执行被权限挡住，见沉淀文档证据表）。
+
 
 
 ## [0.3.0] — 2026-09-19

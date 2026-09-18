@@ -84,8 +84,26 @@ Mimosa 扫描的离线公告库命中 2 包 2 组 advisory；本轮用 **pip-aud
 
 **结论**：2 条离线 advisory 联网复核为**真实存在但本项目使用面不可达**（嵌入向量库本机使用＋
 词干器本地纯 Python）。**不建议因 CVE 立即升版**（chroma 升级有历史风险），跟踪升级窗口即可。
-复跑命令：
+
+## 六、安全 seal 复扫与替代口径（七轮 T6／D5，2026-09-19）
+
+**Mimosa 正式 seal 本轮仍无法刷新**（环境限制，如实记）：Qoder 侧命令面查无 mimosa 可执行
+（`command -v mimosa` 空、`D:/AI` 下无该工具目录），且它是 ZCode 的 PreToolUse 钩子、
+不随本项目分发。所以六轮 D5 的替代口径继续有效，本轮把它**重新量一遍**而不是沿用旧结论：
+
+| 替代 seal 项 | 本轮实测（HEAD `a2ee75d`） | 与 §五（09-18）对照 |
+|---|---|---|
+| pip-audit 联网 OSV 复扫 | 132 包，命中 **2 包**：`chromadb 1.5.9`（5 条 PYSEC）、`nltk 3.10.3`（1 条） | **同一批**，无新增 |
+| 使用面可达性 | 只用内嵌 `PersistentClient` ＋ PorterStemmer，不跑 server／不用认证面／不调工件下载 | 结论不变：**不可达** |
+| 凭据扫描（tracked 树） | 零命中 | 零命中 |
+| CI | run 35382034133（六 job，push 触发） | 见沉淀文档末尾终判 |
+| 本轮新增依赖 | 无（`uv.lock` 只是把既有解析结果入库，未加包） | — |
+
+> **待办口径**：等 Mimosa 可用（ZCode 侧或独立分发）时**必须复扫并替换本节**，届时本节记为
+> "替代 seal 历史"。本轮不谎称"Mimosa 已扫过"。
+
+复跑：
 ```bash
-uv pip install --python .venv/Scripts/python.exe pip-audit
 .venv/Scripts/python.exe -m pip_audit --path .venv/Lib/site-packages -f json
+.venv/Scripts/python.exe scripts/scan_credentials.py
 ```
