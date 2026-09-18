@@ -156,6 +156,22 @@ prediction/label/error、失败数与跳过数（有失败必须在报告里如�
 分类看：cat2 时间 6.7→**11.06**（短板类被正面改善）；cat4 单跳 38.5→51.77；cat1 20.8→25.38；
 cat5 对抗 51.4→**48.0（−3.4pp，对抗题邻居可能引入干扰，如实记录）**。检索口径≥48% 达标；
 官方分联动验证（T7-④，预算内）也过了——"检索提升 → 官方分提升"因果链闭合。
+
+> **cat5 负效应归因注（六轮 G5/B4 收口，2026-09-18，0 花费，逐题对照两份官方分 JSON 的
+> `official.rows`，2026-09-18 本机独立复算复核）**：机理实锤＝**错位锚定**，不是稀释——
+> 对抗题（gold=`['None']`）的正确行为是拒答（"Not mentioned in the conversation"，判 1 分）；
+> ±1 邻居把相邻轮的**貌似相关的事实**推进上下文，诱导模型改口作答具体内容，被判 0 分。
+> 逐题配对 n=446：**46 题 1→0（拒答被诱导为作答）、31 题 0→1、持平 369，净 −15 题＝−3.36pp**
+> （与总表 −3.4pp 吻合）；掉分题 46/46 的答案文本均发生漂移，且邻居追加数（均值 5.98）
+> 与全体 cat5 无差——掉分与邻居**数量**无关，与邻居轮**是否含干扰事实**有关。
+> 掉分样例（前 4 条，pred 原文）：conv-26-q169「Why Caroline took up running」gold=None，
+> 无邻居="(b) Not mentioned"→邻居="(a) To de-stress and clear her mind"；
+> conv-26-q174 gold=None→"(a) once or twice a year"；conv-26-q197 gold=None→
+> "(b) Went on a nature walk or hike."；conv-30-q85 gold=None→"(a) Glad"。
+> **建议（结论即可，改不改听栗子）**：维持邻居扩展不变——整体 +6.13pp ≫ cat5 按题加权
+> 的 −0.77pp；若按类别裁剪（对抗类不加邻居）代价约 −0.8pp 整体分，属提分方向，
+> 按"评估数据优化暂停"纪律不主动实施。与正本 §10.1 注同源。
+
 复跑：
 ```bash
 HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-small-en-v1.5" hippocampus \

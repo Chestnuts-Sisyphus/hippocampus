@@ -3,6 +3,47 @@
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)；
 `MemoryCore` 接口自 v1 起**只允许追加字段**（见 `docs/memory-core-v1.md`）。
 
+## [0.3.0] — 2026-09-19
+
+第五与第六轮（T2–T14 / G4–G10）的集中发版，共 18 个提交：性能、评测可信度、
+工程韧性与发布治理一次收口。**双形态（代理 + Agent）共用一份记忆核心的定位不变，
+`MemoryCore` 接口仍为 v1（只追加，本轮无契约变更）**。
+
+性能（本机实测，fresh 库首跑）：
+
+- 单条写入 p50 **632.8 ms → 42.0 ms**（增量索引同步，T6）；
+- 会话缓存 LRU 上限可配（T5）：LongMemEval 神经档 200 账户峰值 **~4 GB → ~1.1 GB（−72%）**，
+  证据命中仍 100%；
+- 四通道检索 p50 48 ms、注入组装 p50 109 ms（README 性能表同源）。
+
+评测（公开基准 + 官方判分口径）：
+
+- LoCoMo-10 全量 1986 官方 F1 **32.55%（CI 30.8–34.4）→ ±1 轮邻居扩展后 38.68%
+  （CI 36.8–40.5，+6.13pp，`--neighbors` 显式开）**；口径三件套：deepseek-chat 判分、
+  temperature=0、输入＝记忆层 top-8 注入非全文；
+- LongMemEval-oracle 判分准确率 **70.5%（Wilson 63.8–76.4，n=200 抽样）**维持既有口径；
+- cat5 对抗邻居负效应（51.4→48.0）完成逐题归因：**错位锚定**（邻居轮的具体事实诱导
+  对抗题放弃正确拒答），46 题 1→0 / 31 题 0→1，机理注记入 `docs/benchmark.md` §二·四；
+- 英文实体抽取 A/B 否定结论（−0.45pp）、四通道消融单通道非瓶颈、多账户常态压测
+  （200 账户 100% / 365.8 MB / 45 s）入档；候选集哨兵接入 CI（词法档阈值 25，红测已证）。
+
+工程与韧性：
+
+- `ingest_history` 精确去重（重复导入不再滚大库）、LRU 逐出连带清 `_locks`；
+- `scripts/demo_flow.py` 跨会话三形态演示（4 断言）；judge 双判分歧率脚本 `bench_judge_cross.py`；
+- CLI 帮助行漂移修复、psutil 进 dev extras＋缺装降级；
+- 共享 chroma client 完成一页方案并以**否决策**收口（`docs/chroma-client-sharing.md`）；
+- e5 前缀型模型登记为已知限制（`docs/embedding.md` E4/G9）。
+
+文档与治理：
+
+- README 双语测试数订正为 **476（3 xfailed）**；新增 `docs/benchmark.en.md`、
+  `docs/deployment.md`、`docs/release-sync.md`（F1/F2 同步纪律）；
+- 版本三方不一致（pyproject 0.2.1 / tag v0.2.2 / CHANGELOG）随本段归一为 **0.3.0**。
+
+诚实限制：cat3 开放域（12.25%）与多跳仍是短板；官方分为抽样/单机口径，不作普适承诺；
+`bge-small-zh` 中文端到端实测不优于默认档（未过 CI 开 ≥9/10 阈值）；评估数据"优化"暂停纪律继续有效。
+
 ## [0.2.2] — 2026-09-18
 
 第四个版本：**官方判分臂**。README 转英文（GitHub 主页对齐 GitTok/Infinigrow 包装方式）；
