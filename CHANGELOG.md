@@ -3,9 +3,12 @@
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)；
 `MemoryCore` 接口自 v1 起**只允许追加字段**（见 `docs/memory-core-v1.md`）。
 
-## [Unreleased]（九轮 安全面补齐与门禁扩容）
+## [0.5.0] - 2026-09-19（九轮 安全面补齐与门禁扩容）
 
-> 本段随下一个 tag 发布（W15）。**含两处默认对外行为变更**（非环回部署会受影响），故按 SemVer 取 minor。
+> **含两处默认对外行为变更**（非环回部署会受影响），故按 SemVer 取 minor。
+> 口径三件套（对外引用本版本分数必带）：top-8 记忆注入（非全文）／DeepSeek 判分／LongMemEval-oracle 全量 n=500。
+> **版本六处一致**（本段即发版段，六个面见本节末条）：`pyproject`／`__version__`／安装元数据／
+> FastAPI `app.version`／`uv.lock` 根包／CHANGELOG 顶部段，由 `tests/test_n39_r9_version_single_source.py` 机器核对。
 
 安全面：
 
