@@ -17,7 +17,7 @@
 | 轮末守卫（漏抽补实体／消歧） | `consolidate` → `_run_turn_guards` | 同上 | 同上 |
 | 确认消费（`确认 n`／`否决`） | `confirm` | `_handle` 请求入口消费 | **`think` 轮首消费**（`step==1`） |
 | 显式写入／改写／删除 | `write` / `update_memory` / `delete_memory` | 记忆 CRUD 走 CLI（代理不暴露写接口） | `remember`／`list_memories` 工具 |
-| 待确认视图／候选／可疑 | `pending` / `pending_blocks` / `suspicious` | `/health` 与 CLI | `RunResult.pending` 与 CLI |
+| 待确认视图／候选／可疑 | `pending` / `pending_blocks` / `suspicious` | CLI：`memory pending`／`memory review --suspicious`；`/run` 响应带 `pending` 计数（**`/health` 不含这些字段**，实测只有 ok／port／档位／stats／index／lock） | `RunResult.pending` 与 CLI |
 | 生命周期／离线固化／维护扫描 | 会话维护路径（`maybe_run_maintenance`） | 注入路径低频触发 | 同左（同一会话对象） |
 | 索引健康与自愈 | `index_health` / `rebuild_index` | `doctor`／`hippocampus index rebuild` | 同左 |
 | 审计与 explain | `audit.jsonl`（旁路）＋ `explain` | `explain --run`（读轨迹＋审计） | 同左（轨迹含每步注入与被剔） |

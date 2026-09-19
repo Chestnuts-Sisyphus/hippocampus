@@ -70,6 +70,10 @@
   抽 200 的 70.5% 保留为**口径历史行**（两批检索指标 99.6%／40.0% 与 100.0%／48.5% 分列、
   明确"不得跨批混用"）；顺带补上此前 `docs/benchmark.md` **缺失的官方判分结果表**
   （含 LME 分型与 judge 一致性 8.0% 分歧率 → 标注"deepseek-judge 口径"）；
+- **自挖两处文档缺陷**：`docs/benchmark.md` 小节序号乱序（「二·七 多账户压测」排在「二·六 批次漂移」之前）
+  → 互换为递增；`docs/forms-parity.md` 误称 `/health` 输出 `pending/pending_blocks/suspicious`
+  （真机实测其字段只有 ok／offline／port／formats／upstream_endpoint／embedding／stats／index／lock）
+  → 改为「CLI `memory pending`／`memory review --suspicious` ＋ `/run` 响应带 `pending`」；
 - 管理口鉴权口径裁定（B8）：`/health` 维持**免鉴权探针位**（自 0.1.0 如此、默认环回，
   收紧会动到 `scripts/demo_flow.py` 与三处既有测试的探活用法），文档按"两档"如实写明。
 - **cat3 低分归因（§二·八，零新花费）**：只读既有官方判分 JSON 配对分析——

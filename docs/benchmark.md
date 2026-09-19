@@ -219,7 +219,7 @@ bge-small，每变体独立数据根，只关一个通道）：
 **单一通道都不是瓶颈**；既有"去掉整个记忆条层掉 9pp"的粗口径依然成立（那是整层，不是单通道）。
 哨兵：`--sentinel --sentinel-threshold 45`（神经档全开证据命中下限）；CI 用全量档跑，低于则红。
 
-### 二·七 多账户常态压测（T4/A15，`scripts/bench_multi_account.py`）
+### 二·六 多账户常态压测（T4/A15，`scripts/bench_multi_account.py`）
 
 日常可跑的多账户/长跑压测（合成数据、离线、零凭据）：N 账户每账户几条记忆 + 1 次查询，
 报告**证据命中**与**进程峰值工作集**（LRU 上限生效时多账户内存有界）。200 账户实测
@@ -229,7 +229,7 @@ bge-small，每变体独立数据根，只关一个通道）：
 python scripts/bench_multi_account.py --accounts 200 --json D:/tmp/multi_account_200.json
 ```
 
-### 二·六 批次漂移归因（T10，C1 收口）
+### 二·七 批次漂移归因（T10，C1 收口）
 
 LME 200 题三臂对照（同数据同代码同嵌入，离线）：fresh home A 第一遍 **48.5%**；**同一 home
 第二遍 42.5%（−6.0pp）**；fresh home B 48.5%（与 A1 差 0.0pp）。**结论：跨 fresh 批次恒等、
