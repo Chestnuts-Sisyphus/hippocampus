@@ -59,6 +59,76 @@ curl -s "http://127.0.0.1:8765/trace?run_id=<上一条返回的 run_id>" \
   -H "Authorization: Bearer $TOKEN" -H "X-Hippocampus-Account: me"
 ```
 
+#### 返回字段（八轮 V9，以真机响应与代码为准）
+
+下面的字段名**不是设计稿**：来自真起管理口进程拿到的响应（`scripts/live_management_smoke.py`），
+取数实现是 `MemoryCore.trace_run()`（形态层不直接读记忆层日志，A22 架构闸）。
+本小节由 `tests/test_n37_r8_live_smoke.py` 与真响应**双向比对**——实现加了字段而这里没补，测试就红。
+
+**`/trace` 顶层**（查询参数 `run_id`，scope 走头）
+
+| 字段 | 含义 |
+|---|---|
+| `run_id` | 回显你传的那个 run_id（`/run` 的返回值） |
+| `account` | 本次查询用的账户（`X-Hippocampus-Account`，缺省为默认账户） |
+| `found` | 审计里有没有这个 run。**false 时接口直接回 404**，不回半个对象 |
+| `audit` | 匹配到的检索审计事件数组（正常一条；同一 run_id 里检索被调用多次就会有多条） |
+| `observe` | 观察事件数组（见下） |
+
+**`audit[]`** 一条＝一次注入检索（`memory/audit.record_retrieval`）
+
+| 字段 | 含义 |
+|---|---|
+| `event` | 事件类型，目前恒为 `audit.retrieval` |
+| `ts` | 毫秒时间戳 |
+| `query` | 这一轮的问题原文（**截断 300 字**） |
+| `run_id` | 该次注入的语义链标识（同一问题在多处调用时按它精确归位） |
+| `candidates` | **候选全集**（排名顺序），最多落盘 `TOP_N`＝50 条 |
+| `injected_ids` | 实际进入注入位的 id 列表（最多 50 条） |
+| `total_candidates` | 截断前的候选总数 |
+| `capped` | 超出 50 条、因此**没有**落盘的候选数（不是"总共只有这么多"） |
+
+**`audit[].candidates[]`** 一条＝一个候选（这就是"为什么它没进来"的答案所在）
+
+| 字段 | 含义 |
+|---|---|
+| `doc_id` | 候选的记忆／经历 id |
+| `kind` | 条目类型（记忆类型；经历条另有其值） |
+| `channel` | 命中它的检索通道（四通道之一；空串＝旧版事件没记） |
+| `score` | 分数，保留 4 位小数 |
+| `injected` | 是否真的被注入 |
+| `dropped` | 是否被剔除（等价于 `reason` 非空） |
+| `reason` | 剔除原因；**未剔除时是空串**（不是 null） |
+
+**`observe[]`** 三类事件共用一个数组，按 `event` 区分（`memory/observe_log`）
+
+| 字段 | 出现在 | 含义 |
+|---|---|---|
+| `event` | 全部 | `injection`／`confirmation`／`verification` |
+| `ts` | 全部 | 毫秒时间戳 |
+| `query`、`injected_ids` | injection | 该轮问题（截断 200 字）与实际注入 id（最多 20 条） |
+| `decision`、`winner_id`、`loser_ids` | confirmation | 确认块消费结果（`confirm`／`veto`）与涉及的 id |
+| `status`、`method`、`evidence`、`dropped` | verification | 可求证判定的状态／判据／证据摘要，以及是否因此不进正式库 |
+
+> **一条实现事实，别按直觉理解**：`observe` 的取数条件是"`run_id` 相等 **或** 事件属于
+> `verification`／`confirmation`"——后两类事件本身不带 run_id，所以它们会把该账户的同类事件
+> **一并**带出来（不只是这一轮的）。想要"只看这一轮"，自己按 `ts` 窗口过滤。
+
+**`/health`**（环回免鉴权；非环回要令牌——见上面第 2 条）
+
+| 字段 | 含义 |
+|---|---|
+| `ok` | 恒 true（进程活着就回，探活用这个字段） |
+| `offline` | 本进程是否离线档（管理口恒 true：不转发对话上游） |
+| `confirm_block` | 是否追加确认块 |
+| `port` | 配置里的代理端口（**不是**本次实际监听端口，端口以启动行为准） |
+| `formats` | 支持的三种入站格式 |
+| `upstream_endpoint` | 配置的上游端点类型（chat／anthropic／responses） |
+| `embedding` | 当前嵌入档（`model`／`dimension` 等） |
+| `stats` | 库内计数（记忆／经历／实体等） |
+| `index` | 索引健康（`index_health()`：条数对齐、可写性、队列深度、最近错误） |
+| `lock` | 会话锁状态 |
+
 ## 三、局域网/公网暴露（**不推荐**，真需要时按下面做）
 
 1. **换监听地址**：`config.json` 或环境变量把 `host` 改为 `0.0.0.0`（任意网卡）或具体内网 IP。

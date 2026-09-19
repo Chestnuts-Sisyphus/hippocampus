@@ -87,7 +87,8 @@ def test_lru_never_evicts_in_use_session(home, monkeypatch):
 
     t = threading.Thread(target=holder)
     t.start()
-    assert entered.wait(3), "持有线程未进入锁内"
+    # 纯死锁兜底（V13）：等的是"线程进锁"这一事件，由被等的一方 entered.set() 置位；
+    assert entered.wait(300), "持有线程未进入锁内"
 
     try:
         # 主线程开一堆账户触发逐出（上限 2）
@@ -99,7 +100,7 @@ def test_lru_never_evicts_in_use_session(home, monkeypatch):
             assert "busy" in core._sessions  # noqa: SLF001
     finally:
         release.set()
-        t.join(timeout=5)
+        t.join(timeout=300)  # 死锁兜底：release 已置位，正常路径 <1 秒
         core.close()
 
     assert not errors

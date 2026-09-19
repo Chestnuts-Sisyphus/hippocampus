@@ -23,6 +23,8 @@ from pathlib import Path
 
 BENCH_DIR = Path("D:/tmp/hc-bench")
 DEFAULT_RUNS = (BENCH_DIR / "loco_official_full.json", BENCH_DIR / "loco_nb_official.json")
+ROOT = Path(__file__).resolve().parents[1]
+FIXTURE_DATASET = ROOT / "tests" / "fixtures" / "locomo_conv26.json"
 
 # force-utf8 shim：Windows 控制台默认代码页打不出中文会 UnicodeEncodeError
 for _stream in (sys.stdout, sys.stderr):
@@ -68,6 +70,34 @@ def _passes(row: dict | None, threshold: float = 0.5) -> bool | None:
     return None if score is None else float(score) >= threshold
 
 
+def _selfcheck() -> int:
+    """干跑（八轮 V5，进 CI 用）：输入换成**仓内 fixture ＋临时目录现造的合成分**，
+
+    验证的是"参数解析→配对归因→机理拆分→样例打印"这条链没烂；
+    合成值不参与任何正式结论，也不改判据。
+    """
+    import tempfile  # noqa: PLC0415
+
+    if not FIXTURE_DATASET.exists():
+        raise SystemExit(f"干跑缺 fixture：{FIXTURE_DATASET}")
+    meta = _load_dataset(FIXTURE_DATASET)
+    cats = sorted({int(v["category"]) for v in meta.values() if str(v.get("category", "")).isdigit()})
+    cat = cats[0] if cats else 1
+    qids = [q for q, v in meta.items() if str(v.get("category")) == str(cat)][:6]
+    if not qids:
+        raise SystemExit("fixture 里没有带分类的题目，干跑无从构造")
+    root = Path(tempfile.mkdtemp(prefix="hc-cat-selfcheck-"))
+    paths = []
+    for offset, name in ((0, "run_a.json"), (1, "run_b.json")):
+        rows = [{"qid": q, "score": 0.0 if (i + offset) % 2 == 0 else 1.0} for i, q in enumerate(qids)]
+        path = root / name
+        path.write_text(json.dumps({"official": {"rows": rows}}, ensure_ascii=False), encoding="utf-8")
+        paths.append(path)
+    print("== 干跑（输入为仓内 fixture ＋ 合成分，不作正式结论）==")
+    return main(["--category", str(cat), "--runs", ",".join(str(p) for p in paths),
+                 "--dataset", str(FIXTURE_DATASET)])
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="分类低分归因（只读既有官方判分 JSON）")
     ap.add_argument("--category", type=int, default=3, help="目标分类（LoCoMo cat1–cat5）")
@@ -75,7 +105,11 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--dataset", default=str(BENCH_DIR / "locomo10.json"), help="题目元信息来源（只读）")
     ap.add_argument("--max-samples", type=int, default=8)
     ap.add_argument("--json", help="把结果写到该路径")
+    ap.add_argument("--selfcheck", action="store_true", help="干跑（八轮 V5）：用仓内 fixture 与合成分跑一遍归因链")
     args = ap.parse_args(argv)
+
+    if args.selfcheck:
+        return _selfcheck()
 
     paths = [Path(p.strip()) for p in args.runs.split(",") if p.strip()]
     if len(paths) < 2:

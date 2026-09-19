@@ -39,7 +39,9 @@ class _Server:
 
     def __enter__(self) -> _Server:
         self.thread.start()
-        deadline = time.time() + 20
+        # 纯死锁兜底（V13）：真等待靠轮询 server.started 事件，本值只在uvicorn 永不就绪时兜底，
+        # 不做"预计 20 秒内起得来"的功能性假设（慢 runner 上开 chroma 集合可远超 20 秒）。
+        deadline = time.time() + 300
         while time.time() < deadline:
             if getattr(self.server, "started", False):
                 return self
@@ -48,7 +50,9 @@ class _Server:
 
     def __exit__(self, *exc: object) -> None:
         self.server.should_exit = True
-        self.thread.join(timeout=10)
+        # 收尾等线程退出：值取 30 秒纯属死锁兜底（实测 should_exit 后 <1 秒退出）；
+        # 真卡住时宁可留下一个线程，也不让 teardown 变成新的假红来源。
+        self.thread.join(timeout=30)
 
 
 def test_real_uvicorn_serves_and_injects(core, scope):

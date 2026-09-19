@@ -70,7 +70,18 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--account", default="supersede-live")
     ap.add_argument("--settle", type=float, default=0.8, help="写旧句后等待向量索引落盘的秒数")
     ap.add_argument("--json", help="把结果写到该路径")
+    ap.add_argument(
+        "--selfcheck",
+        action="store_true",
+        help="干跑（八轮 V5，进 CI 用）：只跑 1 对变更句、临时 fresh home、settle=0",
+    )
     args = ap.parse_args(argv)
+
+    if args.selfcheck:
+        import tempfile
+
+        args.home = str(Path(tempfile.mkdtemp(prefix="hc-sup-selfcheck-")) / "home")
+        args.settle = 0.0
 
     from hippocampus.core import MemoryCore, Scope
     from hippocampus.memory import config as mem_config
@@ -97,7 +108,7 @@ def main(argv: list[str] | None = None) -> int:
     rows: list[dict] = []
     failures: list[str] = []
     try:
-        for i, (old, new, question) in enumerate(PAIRS):
+        for i, (old, new, question) in enumerate(PAIRS[:1] if args.selfcheck else PAIRS):
             # 每对**独立账户**：同一账户里堆多条同主题记忆时，神经档会把它们彼此靠拢
             # （实测 bge-zh 下 Chrome↔Firefox 与 VS Code↔Vim 互 sim ≥0.93），
             # 最近邻就不再是"本对的旧句"，测不出 supersede 分支。分账户才是干净归因。

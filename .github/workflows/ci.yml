@@ -74,6 +74,22 @@ jobs:
           python -c "import uvicorn, fastapi, httpx; print('proxy extra ready')"
           python -m pytest tests/test_t6_real_server.py tests/test_n6_streaming.py tests/test_n7_auth_passthrough.py tests/test_n15_proxy_tools.py -q
 
+      - name: Round-8 V5 live management-port smoke (real CLI process, five HTTP semantics)
+        # Round-7's two live smoke runs caught real defects that full-green pytest missed
+        # (/run bare 500, /health field mislabel). This keeps that layer as a standing gate:
+        # spawns `hippocampus serve` as a real subprocess on a random free port with an
+        # isolated home, server output goes to a file (never an unread PIPE), process is
+        # always killed. Asserts 200/401/400/404/502. Zero egress, zero credentials.
+        run: python scripts/live_management_smoke.py
+
+      - name: Round-7 live tools dry-run gate (--selfcheck)
+        # These two were manual-only artifacts. V5 downgrades them to CI-resident dry runs:
+        # supersede probe runs one pair against a fresh temp home on the lexical tier;
+        # attribution runs on the in-repo fixture with synthetic rows (no official numbers touched).
+        run: |
+          python scripts/live_supersede_probe.py --selfcheck
+          python scripts/bench_cat_attrib.py --selfcheck
+
       - name: 离线冒烟：doctor → seed → demo ＋ **阈值断言**（分数回归会被 CI 抓到）
         # 阈值口径：记忆开 ≥ 9/10、记忆关 ≤ 6/10（本机实测 10/10 与 3/10，留余量防脆）。
         # 分数只降不升说明记忆层退化——这条断言就是"回归红线"（N17-C2）。
