@@ -170,9 +170,13 @@ jobs:
           python-version: "3.11"
 
       - name: 只装核心依赖（不装向量库 / 不装代理端点）
+        # Only the test *runner* is added on top of the core install: pytest lives in [dev],
+        # so a bare `pip install -e .` left the W4 subset step unable to start at all
+        # ("No module named pytest") -- batches D/E/F red, root-caused. No vector/proxy
+        # extras here: the chromadb-absence assertion below is the point of this job.
         run: |
           python -m pip install --upgrade pip
-          pip install -e .
+          pip install -e . pytest
 
       - name: 无向量库也能做完整记忆纪律
         run: |

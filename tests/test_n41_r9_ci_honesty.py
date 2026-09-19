@@ -47,6 +47,39 @@ def test_ci_configures_ledger_fixture_at_job_level():
     )
 
 
+def _core_only_install_line(ci: str) -> str:
+    """取 core-only job 里那行 `pip install -e .`（该 job 只有一个安装步）。"""
+    section = ci.split("\n  core-only:", 1)
+    assert len(section) == 2, "ci.yml 里 core-only job 不见了"
+    lines = [ln.strip() for ln in section[1].splitlines() if ln.strip().startswith("pip install -e .")]
+    assert len(lines) == 1, f"core-only 安装步应恰好一行，实得 {lines}"
+    return lines[0]
+
+
+def _check_core_only_install(ci: str) -> None:
+    """判据两半：必须带 pytest（否则子集步是死的）；必须不带 vector/proxy/dev 附加档
+    （否则这个 job 证明不了"无向量库降级档"，下一步的 chromadb 缺席断言会失效）。
+    """
+    line = _core_only_install_line(ci)
+    assert " pytest" in line, "core-only 安装步没装 pytest：最小 pytest 子集会因缺模块而永远红"
+    for extra in ("vector", "proxy", "dev"):
+        assert f"[{extra}]" not in line, f"core-only 安装步引入了 {extra} 附加档：降级档不再被隔离"
+
+
+def test_core_only_job_installs_the_test_runner_it_runs():
+    """批次 D/E/F 红点根因：pytest 属 dev 依赖，只装 `-e .` 时"W4 minimal pytest
+    subset"那一步连解释器都起不来（`No module named pytest`）。
+    """
+    _check_core_only_install(CI.read_text(encoding="utf-8"))
+
+
+def test_dropping_pytest_from_core_only_install_turns_the_gate_red():
+    """植入即红对照：把 pytest 从安装行去掉 → 同一条闸必须判红。"""
+    planted = CI.read_text(encoding="utf-8").replace("pip install -e . pytest", "pip install -e .")
+    with pytest.raises(AssertionError):
+        _check_core_only_install(planted)
+
+
 def test_synthetic_fixture_satisfies_the_same_assertion_the_guard_makes():
     """夹具必须满足守护测试的**同一条**断言——否则 CI 上跑的是个假样本。"""
     assert FIXTURE.is_file(), "仓内合成夹具被删：CI 会退回永远 skip"
