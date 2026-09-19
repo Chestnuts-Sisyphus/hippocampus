@@ -826,7 +826,7 @@ def _sort_injection_results(
 
 
 def prepare_injection(
-    session: MemorySession, user_text: str, flow: str = "user", body_text: str = ""
+    session: MemorySession, user_text: str, flow: str = "user", body_text: str = "", run_id: str = ""
 ) -> tuple[str, str, list[dict[str, Any]]]:
     """检索记忆并构造两层注入文本。返回 (稳定层文本, 流动层文本, 过滤后的检索结果)。
 
@@ -991,7 +991,9 @@ def prepare_injection(
                 observe_log.log_injection(
                     session.account_id,
                     user_text,
-                    [r["doc_id"] for r in filtered] + list(stable_ids),
+                    [r['doc_id'] for r in filtered] + list(stable_ids),
+                    run_id,
+                )
                 )
             except Exception as e:
                 sys.stderr.write(f"[memory] 注入观察记录失败（不中断）: {e}\n")

@@ -733,7 +733,7 @@ class MemoryCore:
                 return injection
             try:
                 stable_text, fluid_text, filtered = mb.prepare_injection(
-                    session, query, flow=flow, body_text=seen_text
+                    session, query, flow=flow, body_text=seen_text, run_id=injection.run_id
                 )
             except Exception as e:
                 sys.stderr.write(f"[core] 注入装配失败（软失败，返回空注入）: {e}\n")

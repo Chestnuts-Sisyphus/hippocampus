@@ -33,8 +33,8 @@ def _append(account_id: str, event: dict[str, Any]) -> None:
     jsonl_log.append_jsonl(observe_path(account_id), event)
 
 
-def log_injection(account_id: str, query: str, injected_ids: list[str]) -> None:
-    """注入观察：query + 实际注入的记忆/经历 id 列表。"""
+def log_injection(account_id: str, query: str, injected_ids: list[str], run_id: str = "") -> None:
+    """注入观察：query + 实际注入的记忆/经历 id 列表 / run_id（九轮 X2）。"""
     import time
 
     _append(
@@ -42,6 +42,7 @@ def log_injection(account_id: str, query: str, injected_ids: list[str]) -> None:
         {
             "event": "injection",
             "ts": int(time.time() * 1000),
+            "run_id": run_id,
             "query": (query or "")[:200],
             "injected_ids": injected_ids[:20],
         },
@@ -49,9 +50,9 @@ def log_injection(account_id: str, query: str, injected_ids: list[str]) -> None:
 
 
 def log_confirmation(
-    account_id: str, decision: tuple, winner_id: str | None = None, loser_ids: list[str] | None = None
+    account_id: str, decision: tuple, winner_id: str | None = None, loser_ids: list[str] | None = None, run_id: str = ""
 ) -> None:
-    """确认块消费观察：decision（('confirm', id) / ('veto', None)）+ 涉及记忆。"""
+    """确认块消费观察：decision（('confirm', id) / ('veto', None)）+ 涉及记忆 / run_id（九轮 X2）。"""
     import time
 
     _append(
@@ -59,6 +60,7 @@ def log_confirmation(
         {
             "event": "confirmation",
             "ts": int(time.time() * 1000),
+            "run_id": run_id,
             "decision": decision[0],
             "winner_id": winner_id,
             "loser_ids": loser_ids or [],
