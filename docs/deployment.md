@@ -72,7 +72,7 @@ curl -s "http://127.0.0.1:8765/trace?run_id=<上一条返回的 run_id>" \
 取数实现是 `MemoryCore.trace_run()`（形态层不直接读记忆层日志，A22 架构闸）。
 本小节由 `tests/test_n37_r8_live_smoke.py` 与真响应**双向比对**——实现加了字段而这里没补，测试就红。
 
-**`/trace` 顶层**（查询参数 `run_id`，scope 走头）
+**`/trace` 顶层**（查询参数 `run_id`，可选 `observe`＝`account`（默认）／`run`，scope 走头）
 
 | 字段 | 含义 |
 |---|---|
@@ -80,7 +80,8 @@ curl -s "http://127.0.0.1:8765/trace?run_id=<上一条返回的 run_id>" \
 | `account` | 本次查询用的账户（`X-Hippocampus-Account`，缺省为默认账户） |
 | `found` | 审计里有没有这个 run。**false 时接口直接回 404**，不回半个对象 |
 | `audit` | 匹配到的检索审计事件数组（正常一条；同一 run_id 里检索被调用多次就会有多条） |
-| `observe` | 观察事件数组（见下） |
+| `observe` | 观察事件数组（见下）。**粒度看 `observe_granularity`**，别默认它是"这一轮的" |
+| `observe_granularity` | 本次取的是哪种粒度：`account`＝整个账户（默认，向后兼容）／`run`＝按该轮时间窗收窄 |
 
 **`audit[]`** 一条＝一次注入检索（`memory/audit.record_retrieval`）
 
@@ -117,9 +118,15 @@ curl -s "http://127.0.0.1:8765/trace?run_id=<上一条返回的 run_id>" \
 | `decision`、`winner_id`、`loser_ids` | confirmation | 确认块消费结果（`confirm`／`veto`）与涉及的 id |
 | `status`、`method`、`evidence`、`dropped` | verification | 可求证判定的状态／判据／证据摘要，以及是否因此不进正式库 |
 
-> **一条实现事实，别按直觉理解**：`observe` 的取数条件是"`run_id` 相等 **或** 事件属于
-> `verification`／`confirmation`"——后两类事件本身不带 run_id，所以它们会把该账户的同类事件
-> **一并**带出来（不只是这一轮的）。想要"只看这一轮"，自己按 `ts` 窗口过滤。
+> **一条实现事实，别按直觉理解**（九轮 W10 更新）：`observe.jsonl` 的三类事件**都不写 `run_id`**
+> ——写它们在记忆层（`memory_bridge` / `core._log_verification`），够不到核心生成的那个 run_id。
+> 所以默认粒度就是**账户级**：`observe=account` 会把该账户的 `verification`／`confirmation`
+> 全部带出来（不只是这一轮的）。想要"只看这一轮"，传 **`?observe=run`**：实现按该 run 的
+> 审计时间戳（拿不到则退回 `run_id` 前缀里嵌的毫秒）前后各 50 毫秒收窄，**只会更少不会更多**。
+> 另一点直觉陷阱：`injection` 事件既不带 run_id 也不在那两类名单里，所以**两种粒度下它都不出现**在
+> `observe` 数组里（它仍是落盘给数据质量线看的痕迹）。
+> 这是**近似**不是严格隔离——同账户并发跑多个 run 时，落进同一窗口的仍会混进来；
+> 真要做到逐 run 精确，得把 run_id 穿到记忆层的观察写入点（那是改协议，另案）。
 
 **`/health`**（环回免鉴权；非环回要令牌——见上面第 2 条）
 

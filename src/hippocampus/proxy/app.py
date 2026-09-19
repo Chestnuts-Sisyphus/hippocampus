@@ -368,14 +368,21 @@ def build_app(
     def run_trace(request: Request):
         """按 `run_id` 取那次注入的全链路审计（候选全集＋剔除原因）＋观察事件。
 
-        取数走 `MemoryCore.trace_run()`——形态层不直接读记忆层的日志文件（A22 架构闸）。"""
+        取数走 `MemoryCore.trace_run()`——形态层不直接读记忆层的日志文件（A22 架构闸）。
+        可选 `?observe=run` 把观察事件收窄到该轮的时间窗（默认 `account`＝整个账户，向后兼容）。"""
         if not _authorized(request):
             return JSONResponse(status_code=401, content=_unauthorized_body())
         run_id = (request.query_params.get("run_id") or "").strip()
         if not run_id:
             return JSONResponse(status_code=400, content={"error": {"message": "缺少 run_id（/run 的返回值）"}})
+        observe = (request.query_params.get("observe") or "account").strip().lower()
+        if observe not in ("account", "run"):
+            return JSONResponse(
+                status_code=400,
+                content={"error": {"message": "observe 只认 account／run", "received": observe}},
+            )
         scope = _scope_from(dict(request.headers))
-        result = core.trace_run(scope, run_id)
+        result = core.trace_run(scope, run_id, observe_granularity=observe)
         if not result["found"]:
             return JSONResponse(
                 status_code=404,

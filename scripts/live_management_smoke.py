@@ -7,6 +7,8 @@
 五条语义都要断言（任务书 V5 验收）：`200`（`/health` 环回免鉴权、`/run`、`/trace`）、
 `401`（缺令牌打 `/run`）、`400`（`/run` 空 text、`/trace` 缺 run_id）、
 `404`（`/trace` 未知 run_id）、`502`（固化阶段模型端点不可用——第二个进程专门钉它）。
+九轮 W10 再加一类：**`/trace` 的 `observe` 粒度**——默认回显 `account`、`?observe=run` 必须真的收窄、
+非法粒度回 400（这三条只有真进程算得实，见 `REQUIRED_KEYS` 末尾五项）。
 
 三条实现纪律（都是本轮踩出来的）：
 - **服务端输出落文件，不接 PIPE**：子进程 stdout 挂管道没人读会假性挂起；
@@ -227,6 +229,23 @@ def run_smoke(root: Path, *, selfcheck: bool = False) -> dict:
         out["trace_404"] = httpx.get(
             f"{server.base_url}/trace", headers=hdrs, params={"run_id": "run_不存在"}, timeout=15
         ).status_code == 404
+        # 九轮 W10：观察事件的 run 粒度过滤必须真生效（默认 account 是整账户，只有真响应能证明收窄）
+        strict = httpx.get(
+            f"{server.base_url}/trace", headers=hdrs, params={"run_id": run_id, "observe": "run"}, timeout=30
+        )
+        strict_body = strict.json() if strict.status_code == 200 else {}
+        out["trace_observe_run_200"] = strict.status_code == 200
+        out["trace_observe_run_echo"] = strict_body.get("observe_granularity") == "run"
+        out["trace_observe_run_narrowed"] = bool(strict_body) and len(strict_body.get("observe") or []) <= len(
+            trace_body.get("observe") or []
+        )
+        out["trace_default_granularity"] = trace_body.get("observe_granularity") == "account"
+        out["trace_400_observe"] = (
+            httpx.get(
+                f"{server.base_url}/trace", headers=hdrs, params={"run_id": run_id, "observe": "随便一个值"}, timeout=15
+            ).status_code
+            == 400
+        )
     finally:
         server.stop()
 
@@ -263,6 +282,12 @@ REQUIRED_KEYS = (
     "trace_400",
     "trace_404",
     "run_502",
+    # 九轮 W10（K15）：observe 粒度的四条语义（只有真进程能证明"过滤确实收窄了"）
+    "trace_default_granularity",
+    "trace_observe_run_200",
+    "trace_observe_run_echo",
+    "trace_observe_run_narrowed",
+    "trace_400_observe",
 )
 
 

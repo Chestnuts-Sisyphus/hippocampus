@@ -58,6 +58,36 @@ def _new_run_id() -> str:
     return f"{int(time.time() * 1000)}-{next(_INJECT_SEQ)}"
 
 
+# 九轮 W10（K15）：`/trace?observe=run` 的时间窗余量。观察事件与审计事件是同一次调用里
+# 先后写的，正常相差个位数毫秒；给 50 毫秒是"宁可留一点余量"，不是功能性超时预算。
+OBSERVE_WINDOW_PAD_MS = 50
+
+
+def _as_ms(value: object) -> int | None:
+    try:
+        return int(str(value))
+    except (TypeError, ValueError):
+        return None
+
+
+def _audit_time_window(audit_events: list[dict], run_id: str) -> tuple[int, int] | None:
+    """该 run 的时间窗（毫秒）：优先用审计时间戳，退化到 `run_id` 前缀里嵌的毫秒。"""
+    stamps = [ms for ms in (_as_ms(e.get("ts")) for e in audit_events) if ms is not None]
+    if not stamps:
+        head = _as_ms((run_id or "").split("-", 1)[0])
+        if head is None:
+            return None
+        stamps = [head]
+    return min(stamps) - OBSERVE_WINDOW_PAD_MS, max(stamps) + OBSERVE_WINDOW_PAD_MS
+
+
+def _in_window(ts: object, window: tuple[int, int] | None) -> bool:
+    if window is None:
+        return False
+    ms = _as_ms(ts)
+    return ms is not None and window[0] <= ms <= window[1]
+
+
 def _episode_duplicate(conn: sqlite3.Connection, session_id: str, role: str, text: str) -> bool:
     """经历层精确去重（C1 六轮）：同会话同角色、内容规范化相等的经历视为重复。
 
@@ -1401,16 +1431,34 @@ class MemoryCore:
         session = self._session(scope)
         return dict(rt.get_active_params(session.conn) or {})
 
-    def trace_run(self, scope: Scope, run_id: str) -> dict[str, Any]:
+    def trace_run(self, scope: Scope, run_id: str, *, observe_granularity: str = "account") -> dict[str, Any]:
         """按 `run_id` 取那次注入的全链路证据（**形态层取数的唯一入口**）。
 
         为什么要经这里：形态层（代理／服务化／CLI）直接 `import hippocampus.memory.*`
         就绕过了"两形态共用一份记忆核心"的定位，A22 架构闸会红。审计与观察日志都在
         账户目录下，读它们属于记忆层职责，所以取数在核心、格式化在形态层。
+
+        `observe_granularity`（九轮 W10）：
+        - `"account"`（默认，向后兼容）＝审计按 run 精确取，**观察事件取整个账户**——
+          因为 `observe.jsonl` 的三类事件（injection／confirmation／verification）都不写
+          run_id（落点在记忆层，够不到核心的 run_id），旧实现那句"`run_id` 相等或属于后两类"
+          实际等价于"该账户全部"；
+        - `"run"` ＝观察事件再按**该 run 的审计时间窗**（前后各留 `OBSERVE_WINDOW_PAD_MS`）收窄。
+          这是近似而非严格隔离：同账户并发跑多个 run 时，落在同一窗口内的仍会混进来。
         """
         scope = _as_scope(scope)
         run_id = (run_id or "").strip()
-        result: dict[str, Any] = {"run_id": run_id, "account": scope.account, "audit": [], "observe": [], "found": False}
+        granularity = (observe_granularity or "account").strip().lower()
+        if granularity not in ("account", "run"):
+            raise ValueError(f"observe 粒度只认 account／run，收到：{observe_granularity}")
+        result: dict[str, Any] = {
+            "run_id": run_id,
+            "account": scope.account,
+            "audit": [],
+            "observe": [],
+            "observe_granularity": granularity,
+            "found": False,
+        }
         if not run_id:
             return result
         from hippocampus.memory import audit as audit_mod
@@ -1421,11 +1469,16 @@ class MemoryCore:
         result["found"] = bool(events)
         observe_file = observe_log.observe_path(scope.account)
         if observe_file.exists():
-            result["observe"] = [
-                e
-                for e in jsonl_log.load_events(observe_file, include_rotated=True)
-                if e.get("run_id") == run_id or e.get("event") in ("verification", "confirmation")
+            entries = jsonl_log.load_events(observe_file, include_rotated=True)
+            # 默认（账户粒度）保持旧口径：带这个 run_id 的，或 verification/confirmation 两类
+            observed = [
+                e for e in entries if e.get("run_id") == run_id or e.get("event") in ("verification", "confirmation")
             ]
+            if granularity == "run":
+                # 收窄只能"更少"，不能反过来把默认不给的类型也放进来（真机冒烟钉住这一点）
+                window = _audit_time_window(events, run_id)
+                observed = [e for e in observed if e.get("run_id") == run_id or _in_window(e.get("ts"), window)]
+            result["observe"] = observed
         return result
 
     def index_health(self, scope: Scope) -> dict[str, Any]:
