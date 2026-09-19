@@ -57,7 +57,7 @@ Hippocampus 把"记忆"做成 agent 的核心能力，而不是外挂的检索�
 
 性能（真实运行库同规模合成库：1154 记忆／2406 实体／6035 关系／497 事件）：
 四通道检索 p50 **48 ms**；注入装配 p50 109 ms；单条写入 p50 **42 ms**（增量索引同步，
-2026-09-18；修复前全量 re-sync 为 632.8 ms）。多账户长跑内存有界：会话缓存 LRU 上限可配，
+2026-09-18；修复前全量 re-sync 为 632.8 ms，**批 D** 同批配对，另批见 `docs/roadmap.md` §五）。多账户长跑内存有界：会话缓存 LRU 上限可配，
 LongMemEval 神经档 200 账户峰值 RSS **~1.1 GB**（原 ~4 GB），证据命中仍 100%。
 
 ## 快速开始
@@ -157,7 +157,7 @@ export HIPPOCAMPUS_BASE_URL=https://api.deepseek.com   # 可选，也可写在 c
 ## 验证自己跑一遍
 
 ```bash
-python -m pytest tests/ -q            # 577 条（含模型臂 21 条；C 盘紧张时加 --basetemp=D:/tmp/pt）
+python -m pytest tests/ -q            # 597 条（含模型臂 21 条；C 盘紧张时加 --basetemp=D:/tmp/pt）
 python scripts/check_interface.py     # MemoryCore v1 契约（scope 第一参数／无 HTTP 字段／只追加）
 python scripts/audit_deps.py          # 依赖审计：全局单例残留必须为 0
 python scripts/scan_credentials.py    # 凭据扫描：零命中
@@ -214,7 +214,7 @@ docs/        接口冻结文档／命名实测／依赖审计／安全说明
   与代理形态同一端口，一次只起一个）。
 - **会话缓存有 LRU 上限**（`HIPPOCAMPUS_SESSION_CACHE_MAX`，默认 16）：常驻内存有界（~1.1 GB），
   代价是被逐出的账户下次访问要重开会话。
-- **单条写入走增量索引同步**：1154 记忆规模 p50 **42 ms**（修复前全量 re-sync 为 632.8 ms）；
+- **单条写入走增量索引同步**：1154 记忆规模 p50 **42 ms**（修复前全量 re-sync 为 632.8 ms，批 D 同批配对）；
   残余风险＝并发写入下索引与库可能出现差异，由 `index_health` 与 `hippocampus index rebuild` 兜底。
 - **英文语料 × 中文标定**分词／阈值：英文基准绝对分低于英文原生系统（逐基准有注）。
 - **官方判分为单模型单次测量**（deepseek-chat；答辩引用必须带"top-8 注入、非全文"脚注）。

@@ -40,7 +40,7 @@ integration** is claimed or shipped.
 
 Official judging implemented as an explicit opt-in arm (`bench --model-arm`): the model answers
 from the memory layer's **injected context (top-8)** — not the full history — and judging follows
-the official repositories (pinned revisions, see `docs/benchmark.md` §2.3).
+the official repositories (pinned revisions, see `docs/benchmark.md` §二·三).
 
 | Benchmark | Official metric | Result (95% CI) | n |
 |---|---|---|---|
@@ -63,7 +63,7 @@ Same-run retrieval metrics (evidence-in-context / answer-in-context): LongMemEva
 
 Performance (real-scale synthetic store: 1,154 memories / 2,406 entities / 6,035 relations /
 497 episodes): 4-channel retrieval p50 **48 ms**; injection assembly p50 109 ms; single write
-p50 **42 ms** (incremental index sync, 2026-09-18; was 632.8 ms with full re-sync);
+p50 **42 ms** (incremental index sync, 2026-09-18; was 632.8 ms with full re-sync — same batch **批 D**, batch pairs in `docs/roadmap.md` §五);
 multi-account memory bounded by an LRU session cache: LME neural benchmark (200 accounts) peak
 RSS **~1.1 GB** (was ~4 GB), evidence recall still 100%.
 
@@ -145,7 +145,7 @@ memory writes are safe-ident/safe-DDL checked, and offline mode means *no outbou
 
 ## 🧪 Tests & CI
 
-- **577 pytest tests** (3 xfailed) — memory core, both forms, guards, embedding tiers, public-bench
+- **597 pytest tests** (3 xfailed) — memory core, both forms, guards, embedding tiers, public-bench
   adapters, official judging arm; all offline-runnable (`pytest --basetemp=D:/tmp/pt`).
 - Demo eval runs in CI with **threshold assertions** (memory on ≥9/10, memory off ≤6/10) — score
   regressions turn the pipeline red.
@@ -187,7 +187,7 @@ thresholds. What is *not* there — so nobody reads more into the repo than it d
 - **Session cache is LRU-capped** (`HIPPOCAMPUS_SESSION_CACHE_MAX`, default 16): bounded RSS
   (~1.1 GB at 200 accounts) but evicted accounts reopen their session on next access.
 - **Single `write` uses incremental index sync** — p50 **42 ms** at 1,154-memory scale (was
-  632.8 ms with full re-sync); residual risk is index/library divergence under concurrent writers,
+  632.8 ms with full re-sync, 批 D 同批配对); residual risk is index/library divergence under concurrent writers,
   covered by `index_health` + `hippocampus index rebuild`.
 - **English corpus × CN-tuned tokenizer/thresholds** — absolute retrieval scores on English benchmarks are lower than an EN-tuned system would score (documented per-benchmark).
 - **Official judging costs API tokens** and is an explicit opt-in flag; every run prints call counts, estimated cost, and balance before/after (¥30 budget hard-stop).

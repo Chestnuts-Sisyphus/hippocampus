@@ -123,7 +123,9 @@ def test_locks_kept_when_held_during_eviction(home, monkeypatch):
 
         t = threading.Thread(target=holder)
         t.start()
-        assert entered.wait(30), "持有线程未进入锁内"
+        # 死锁兜底（九轮 W9）：进锁不是断言对象，30 秒是功能性预算（慢 runner 上会假红），
+        # 与 `tests/test_n25_t5_session_lru.py` 同口径提到 300 秒。
+        assert entered.wait(300), "持有线程未进入锁内"
         # 开更多账户触发逐出（上限 2；held-acc 是"最近用"，先被逐出的会是别人）
         for i in range(2):
             s = Scope(account=f"other-{i}", session="s1", source="user")
@@ -135,7 +137,10 @@ def test_locks_kept_when_held_during_eviction(home, monkeypatch):
             assert "held-acc" in core._locks, "本地仍持有 → 锁对象不得删"
     finally:
         release.set()
-        t.join(timeout=30)
+        # 死锁兜底＋超时即判红（九轮 W9）：30 秒是功能性假设，真卡住时带着活线程去 close
+        # 会撞原生崩溃（见 docs/ci-time-budgets.md §一 二次定性），所以断言线程确实退了。
+        t.join(timeout=300)
+        assert not t.is_alive(), "持有线程未退出，继续 close 会撞原生崩溃"
         core.close()
 
 

@@ -19,6 +19,18 @@ from hippocampus.seed import seed
 
 uvicorn = pytest.importorskip("uvicorn", reason="服务形态需要 uvicorn（proxy extra）")
 
+# 等待值的定性（九轮 W9，逐条登记在 docs/ci-time-budgets.md §二）：
+# - `REQUEST_TIMEOUT_S`：打的是即时应答端点（`/health` 与 400/401/404 分支）→ **请求超时**，
+#   对端是本地服务，必须有界，值本身不是断言对象；
+# - `RUN_TIMEOUT_S`：`/run` 走完整注入＋固化链路（`consolidate` 全链路含扫库），慢 runner 上
+#   真实耗时不是本测试断言的东西。旧写法 `timeout=20` 就是台账第一类禁止的**功能性预算**
+#   （"预计 20 秒内做完，没做完算失败"），故提到与死锁兜底同量级，并把"审计是否落库"这件事
+#   交给下面的完成标记轮询，而不是让单个请求的秒数代判。
+REQUEST_TIMEOUT_S = 10
+RUN_TIMEOUT_S = 300
+AUDIT_DEADLINE_S = 300.0  # 纯死锁兜底：正常路径第一次轮询就命中（/run 是同步落审计）
+AUDIT_POLL_INTERVAL_S = 0.1
+
 
 def _free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
@@ -53,6 +65,25 @@ class _Server:
         assert not self.thread.is_alive(), "服务线程未退出，继续会让夹具 teardown 撞原生崩溃"
 
 
+def _wait_audit(base: str, hdrs: dict[str, str], run_id: str) -> httpx.Response:
+    """完成标记驱动（九轮 W9）：等"这个 `run_id` 的审计里出现 candidates"这个**事件**。
+
+    `/run` 目前是同步落审计的，所以第一次轮询就命中；这层轮询要防的是"哪天固化改成异步"
+    时测试又退回用固定秒数猜——那正是台账第一类禁止的功能性预算。
+    """
+    deadline = time.monotonic() + AUDIT_DEADLINE_S
+    last: httpx.Response | None = None
+    while True:
+        last = httpx.get(f"{base}/trace", headers=hdrs, params={"run_id": run_id}, timeout=RUN_TIMEOUT_S)
+        if last.status_code == 200:
+            body = last.json()
+            if any("candidates" in event for event in body.get("audit") or []):
+                return last
+        if time.monotonic() >= deadline:
+            return last  # 交给调用方的断言判红，回最后一次响应而不是抛超时（信息量更大）
+        time.sleep(AUDIT_POLL_INTERVAL_S)
+
+
 @pytest.fixture()
 def served(core, scope, home):
     """真起一台离线服务（带实例令牌），返回 (base_url, headers, server-context)。"""
@@ -66,7 +97,7 @@ def served(core, scope, home):
 def test_health_reports_index_and_store(served):
     """`/health` 回索引与库健康（服务化口径），不是只有"进程活着"。"""
     base, headers, scope = served
-    resp = httpx.get(f"{base}/health", headers=headers, timeout=10)
+    resp = httpx.get(f"{base}/health", headers=headers, timeout=REQUEST_TIMEOUT_S)
     assert resp.status_code == 200
     body = resp.json()
     assert body["ok"] is True and body["offline"] is True
@@ -82,7 +113,7 @@ def test_run_executes_one_turn_and_returns_run_id(served):
         f"{base}/run",
         headers={**headers, "content-type": "application/json", "X-Hippocampus-Account": scope.account},
         json={"text": "我找岗位时有哪些硬性限制？"},
-        timeout=20,
+        timeout=RUN_TIMEOUT_S,
     )
     assert resp.status_code == 200, resp.text
     body = resp.json()
@@ -96,11 +127,13 @@ def test_run_requires_text_and_token(served):
     """缺 text → 400；缺令牌 → 401（与 `/v1/*` 同一条鉴权口径）。"""
     base, headers, scope = served
     hdrs = {**headers, "X-Hippocampus-Account": scope.account, "content-type": "application/json"}
-    bad = httpx.post(f"{base}/run", headers=hdrs, json={"text": "   "}, timeout=10)
+    bad = httpx.post(f"{base}/run", headers=hdrs, json={"text": "   "}, timeout=REQUEST_TIMEOUT_S)
     assert bad.status_code == 400
-    noauth = httpx.post(f"{base}/run", headers={"content-type": "application/json"}, json={"text": "你好"}, timeout=10)
+    noauth = httpx.post(
+        f"{base}/run", headers={"content-type": "application/json"}, json={"text": "你好"}, timeout=REQUEST_TIMEOUT_S
+    )
     assert noauth.status_code == 401
-    notoken_trace = httpx.get(f"{base}/trace", params={"run_id": "x"}, timeout=10)
+    notoken_trace = httpx.get(f"{base}/trace", params={"run_id": "x"}, timeout=REQUEST_TIMEOUT_S)
     assert notoken_trace.status_code == 401
 
 
@@ -108,10 +141,10 @@ def test_trace_returns_full_candidates_for_that_run(served):
     """`/trace?run_id=` 拿回那次注入的审计（候选全集＋注入标记＋剔除原因）。"""
     base, headers, scope = served
     hdrs = {**headers, "X-Hippocampus-Account": scope.account, "content-type": "application/json"}
-    run = httpx.post(f"{base}/run", headers=hdrs, json={"text": "我的目标岗位方向是什么？"}, timeout=20)
+    run = httpx.post(f"{base}/run", headers=hdrs, json={"text": "我的目标岗位方向是什么？"}, timeout=RUN_TIMEOUT_S)
     run_id = run.json()["run_id"]
 
-    trace = httpx.get(f"{base}/trace", headers=hdrs, params={"run_id": run_id}, timeout=20)
+    trace = _wait_audit(base, hdrs, run_id)
     assert trace.status_code == 200, trace.text
     body = trace.json()
     assert body["run_id"] == run_id
@@ -120,13 +153,13 @@ def test_trace_returns_full_candidates_for_that_run(served):
     assert "candidates" in event, "审计里没有候选全集（A12 口径）"
     assert any(c.get("injected") for c in event["candidates"]), "候选里没有任何被注入项"
 
-    missing = httpx.get(f"{base}/trace", headers=hdrs, params={"run_id": "run_不存在"}, timeout=20)
+    missing = httpx.get(f"{base}/trace", headers=hdrs, params={"run_id": "run_不存在"}, timeout=REQUEST_TIMEOUT_S)
     assert missing.status_code == 404
 
 
 def test_trace_requires_run_id(served):
     base, headers, _scope = served
-    resp = httpx.get(f"{base}/trace", headers=headers, timeout=10)
+    resp = httpx.get(f"{base}/trace", headers=headers, timeout=REQUEST_TIMEOUT_S)
     assert resp.status_code == 400
 
 
@@ -153,7 +186,7 @@ def test_run_degrades_to_502_when_consolidation_fails(core, served, monkeypatch)
         f"{base}/run",
         headers={**headers, "content-type": "application/json", "X-Hippocampus-Account": scope.account},
         json={"text": "我找岗位时有哪些硬性限制？"},
-        timeout=20,
+        timeout=RUN_TIMEOUT_S,
     )
     assert resp.status_code == 502, f"固化失败不该裸 500：{resp.status_code} {resp.text[:200]}"
     body = resp.json()

@@ -96,7 +96,50 @@ def test_验收不依赖预先运行的代理进程(home):
     inproc_src = (ROOT / "tests" / "test_n6_streaming.py").read_text(encoding="utf-8")
     assert "TestClient" in inproc_src and "build_app" in inproc_src, "流式测试应在进程内构造 app（不依赖外部进程）"
     ci = (ROOT / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
-    assert "hippocampus proxy" not in ci, "CI 不应依赖常驻代理进程"
+    assert "hippocampus proxy" not in _ci_executed_commands(ci), "CI 不应依赖常驻代理进程"
+
+
+def _ci_executed_commands(ci_text: str) -> str:
+    """只取 CI 里**真会执行**的命令行（`run:` 本体与其块标量正文），注释与步骤名不参与判断。
+
+    为什么改判据（九轮 W9）：本意是"不许有常驻代理进程给测试连"，旧写法拿全文匹配，
+    于是 W6 那步"自己随机端口起、跑完必杀"的真机冒烟，仅因**英文注释里写了
+    `hippocampus proxy`** 就被判红——那正是最该允许的形态。判据收窄到命令行层面，
+    常驻 `run: hippocampus proxy ...` 依然红（见对照测试）。
+    """
+    out: list[str] = []
+    in_block = False
+    block_indent = 0
+    for raw in ci_text.splitlines():
+        stripped = raw.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        if stripped.startswith("run:"):
+            body = stripped[len("run:") :].strip()
+            in_block = body in {"|", "|-", ">", ">-"}
+            block_indent = indent
+            if body and not in_block:
+                out.append(body)
+            continue
+        if in_block:
+            if indent <= block_indent:
+                in_block = False
+            else:
+                out.append(stripped)
+    return "\n".join(out)
+
+
+def test_常驻代理判据只认命令行不认注释():
+    """对照测试：注释里提 `hippocampus proxy` 不该红；真有一条 `run:` 起常驻代理必须红。"""
+    self_spawning = (
+        "    - name: live smoke\n"
+        "      # this spawns `hippocampus proxy` on a random free port and kills it at exit\n"
+        "      run: python scripts/live_proxy_smoke.py\n"
+    )
+    assert "hippocampus proxy" not in _ci_executed_commands(self_spawning), "自建自杀的冒烟步骤被误判成常驻依赖"
+    resident = "    - name: start service\n      run: hippocampus proxy --port 8765 &\n"
+    assert "hippocampus proxy" in _ci_executed_commands(resident), "真·常驻代理步骤判绿——闸失效了"
 
 
 def test_第二重检索兜底守卫有测试且可跑(home):

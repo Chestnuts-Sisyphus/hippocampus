@@ -38,9 +38,23 @@
   引用时互相指认，不另起炉灶。
 - 联动检查：每轮交付把 `grep` 到的 README 数字清单附在回写区，防"只改了结果文档忘了 README"。
 
-## 三、本轮（2026-09-18 五轮收口）已同步项
+## 三、按轮次的同步记录（最新在上）
 
-- T6 增量 upsert：README 写入行 632.8 ms → **41.98 ms**（1154 记忆规模实测，结果文档 §三 同值）。
+### 九轮（2026-09-19，W1–W6）
+
+- **版本面**：`hippocampus.__version__` 改读安装元数据＋FastAPI `app.version` 同源（W2）→ 六处一致
+  由 `tests/test_n39_r9_version_single_source.py` 核对；本文件"五处"口径升为**六处**。
+- **对外行为口径**：W1 非环回时 `/health`＋`/v1/models` 要令牌、W3 出站默认仅 https →
+  `docs/deployment.md`、`docs/security.md`、`docs/roadmap.md`、README 双语**同日改**（同一批 push 内），
+  Release notes 须带"匿名 `/health` 部署受影响"的硬化提醒（W15）。
+- **公开面出口**：W5 `--git-text`（提交信息／标签注解／Release 正文）纳入同一闸；
+  Release 正文今后写作也要过同一条口径（不含仓外路径与行号指针）。
+- 数字闸：W7 把"同一指标多值必须带（批次／规模／臂）标注"升到对照表级别（`tests/test_n42_r9_number_table_annotations.py`）。
+
+### 五轮（2026-09-18 收口）已同步项
+
+- T6 增量 upsert：README 写入行 632.8 ms → **41.98 ms**（**批 D**＝2026-09-18 五轮 T6 实测，1154 记忆规模，结果文档 §三 同值；
+  与 `docs/roadmap.md` §6.1 的**批 C**（09-17，748.6 ms → 42.0 ms）分列，**不得跨批配对**——九轮 W7 口径）。
 - T7 ±1 轮邻居：LoCoMo 全量证据命中 45.7% → **63.65%**（`--neighbors`，tokens 1354→1767）；
   官方联动批次结果见结果文档 §二·五（若达决策门，README 表格行同步）。
 - T5 LRU：LME 神经档 200 账户峰值常驻内存 **~4GB → 实测值见结果文档 §九 E7 回填**，证据命中仍 ≥98%。

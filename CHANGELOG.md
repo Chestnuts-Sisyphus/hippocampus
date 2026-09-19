@@ -48,6 +48,32 @@
   公开仓历史不改写（八轮 V2），历史既有命中记为基线 `GIT_TEXT_BASELINE = 2`（实测出自 `2419926`
   那条 message），**只减不增**——新写一条线索即红。CI 步骤已改用 `--git-text`；
   出口清单见 `docs/security.md` §⑦·五。
+- **W7 数字闸扩容到对照表**：规则从"同一指标跨文档必须同值"升级为
+  **"多值指标每个值必须带（批次／规模／臂）标注"**，纳入 bge 档对照表与写入"修复前／后"成对基线；
+  上闸前先订正三处归属错（`47.8/46.5` 串到 instr 臂、`46.3%` 无出处、`749/632.8` 未配批次），
+  全部记在 `docs/benchmark.md` 与 `docs/embedding.md`。钉：`tests/test_n42_r9_number_table_annotations.py`
+  （含"植入 `bge-base = 50.0%` 必红"对照）；`roadmap.md` 仍**不参与**头条分比对（旧口径不混写）。
+- **W8 文档互斥与引用卫生**：订正 `docs/benchmark.md` 里"双向人工对齐未做"与"人工抽判已做"自相矛盾的
+  两段、`docs/release-sync.md` §三 停在五轮、以及三处章节指错（`§2.3` → `§二·三`）；
+  `STATUS.md`／`AGENTS.md` 把待拍板正本写成"P1–P5"，**正本实编号是 B1–B10**（P1–P5 是 v0.3.0
+  发版任务序，同名不同物）→ 两处就地改名并注明两套编号并存。钉：`tests/test_n43_r9_doc_reference_hygiene.py`
+  （仓内 `§` 引用必须命中，跨仓只校验文件存在）。
+- **W9 时间预算台账补全＋台账闸**：`docs/ci-time-budgets.md` 从"手写清单"变成**被代码反向校验的表**——
+  新增 `tests/test_n44_r9_time_budget_ledger.py` 扫 `tests/`＋`scripts/` 的每个等待点，
+  要求"文件名与该秒数出现在台账同一行"，缺行即红（植新等待点、把值塞进外部常量，两类都判红）。
+  按判据改判三处功能性预算：`test_n28` 的 30 秒（**八轮首版判成"兜底量级"是错的**，已在
+  `docs/ci-time-budgets.md` §一 该行公开更正）、
+  `test_n31` `/run` 的 20 秒（改 `RUN_TIMEOUT_S`＋审计按 `run_id` 轮询完成标记）、`demo_flow` 的"8 秒起不来即报错"
+  （改 300 秒兜底内的就绪轮询，顺带修掉"探到非 200 不 sleep 会热转"）；两处线程 join 补"超时即判红"存活断言。
+- **W10 `/trace` 的 `observe[]` 粒度收口**：八轮 V9 只把"`observe` 其实是**账户级**"这条事实写进文档，
+  没有可用收窄手段（三类观察事件都不写 `run_id`，写它们在记忆层）。本轮落地过滤：
+  `/trace?observe=account`（默认，行为一字未改）／`observe=run`＝在该轮审计时间戳（拿不到则退回
+  `run_id` 前缀的毫秒）前后 50 毫秒内**再收窄**，响应回显 `observe_granularity` 让调用方看得见粒度；
+  非法值在边界上直接 400。钉：`tests/test_n45_r9_trace_granularity.py`（手工落"窗口内／一小时前"两条事件，
+  证明过滤真的生效）＋真机冒烟五条新语义（`trace_default_granularity`／`trace_observe_run_200`／
+  `trace_observe_run_echo`／`trace_observe_run_narrowed`／`trace_400_observe`）。
+  **第一版实现被真机冒烟当场判红**：它把 `injection` 事件也放进 run 粒度，结果"收窄"反而比默认更宽 →
+  改成"在默认结果之上再筛，只会更少"；口径与近似性（并发同窗口仍会混入）写在 `docs/deployment.md` §二·五。
 
 复跑：
 

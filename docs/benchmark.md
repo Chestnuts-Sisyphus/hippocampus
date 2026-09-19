@@ -68,13 +68,17 @@ HIPPOCAMPUS_OFFLINE=1 .venv/Scripts/python.exe scripts/bench_ab.py \
   --variants "onnx:Xenova/bge-small-en-v1.5|instr=off,onnx:Xenova/bge-base-en-v1.5|instr=off,onnx:Xenova/gte-small|instr=off"
 ```
 
-| 档 | 80 题 A/B | 全量 1986 题（k=8／k=20） | 说明 |
-|---|---|---|---|
-| `builtin-hash`（默认） | — | 36.7%／37.2% | 零下载、纯词法哈希；英文召回弱是它的**已知边界** |
-| **`bge-small-en-v1.5`（384 维）** | 33.8% | **45.2%／49.8%** | **推荐档**：126 MB、p50 45.8 ms（比默认档还快） |
-| `bge-base-en-v1.5`（768 维） | 41.3% | 46.5%／48.8% | 415 MB、768 维，**全量上与 bge-small 打平** → 不划算 |
-| `gte-small`（mean 池化） | 27.5% | 未跑 | 本任务上更差 → 不推荐 |
-| `bge-small-en` + 官方英文查询指令 | 32.5% | 46.5%（另一轮 47.8%） | 无收益（+80 tokens）→ **不登记** |
+**同一指标有多个数值时，每个数都必须带（批次／规模／臂）标注**（九轮 W7 立的口径；两批说明：
+**批 A**＝2026-09-17 `bench_multi_account` 全量首轮（k=8）；**批 B**＝同月用 `scripts/bench_ablation.py`
+"同一脚本同参数"复测批（k=8 与 k=20 两跑）。两批**不合并引用**。）
+
+| 档（臂） | 批 A/B | 80 题 A/B（样本级） | 全量 1986 题（k=8／k=20） | 说明 |
+|---|---|---|---|---|
+| `builtin-hash`（默认，臂＝词法档） | 批 A | — | 36.7%／37.2%（k=8／k=20，批 A） | 零下载、纯词法哈希；英文召回弱是它的**已知边界** |
+| **`bge-small-en-v1.5`（384 维，推荐档）** | 批 A＋批 B | 33.8%（样本级） | **45.7%（批 A，k=8）**；**45.2%／49.8%（批 B，k=8／k=20）** | 126 MB、p50 45.8 ms（比默认档还快） |
+| `bge-base-en-v1.5`（768 维） | 批 A＋批 B | 41.3%（样本级） | **47.8%（批 A，k=8）**；**46.5%／48.8%（批 B，k=8／k=20）** | 415 MB、768 维，**同批（批 B）与 bge-small 打平** → 不划算 |
+| `gte-small`（mean 池化） | — | 27.5%（样本级） | 未跑 | 本任务上更差 → 不推荐 |
+| `bge-small-en` ＋ 官方英文查询指令 | 仅样本批 | 32.5%（样本级，80 题） | **未跑全量**（旧版本此格误抄了 base/small 的数，九轮 W7 订正） | 样本上就低于同批不带指令的 33.8% → 无收益（＋80 tokens）→ **不登记** |
 
 > **小样本会骗人**：80 题的 95% 置信区间约 ±8 pp。上表 bge-base 在 80 题上领先 7.5 pp，
 > 全量上只差 1.3 pp 且 k=20 时反超——**换档结论必须用全量（或明确标注"样本级"）**。
@@ -131,7 +135,10 @@ HIPPOCAMPUS_OFFLINE=1 HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-base-en-v1.5"
   multi-session 62.4（n=133）、single-session-assistant 41.1（n=56）、single-session-preference 96.7（n=30）、
   single-session-user 97.1（n=70）。
 - judge 一致性标定（同题双判 50 题，deepseek-chat ↔ glm-4-flash）：**分歧率 8.0%（4/50）**，4 条都是
-  "deepseek 判错／glm 判对"形态 → 本表官方分统一标注为 **deepseek-judge 口径**（人工裁决未做，不假装已做）。
+  "deepseek 判错／glm 判对"形态 → 本表官方分统一标注为 **deepseek-judge 口径**。
+  口径澄清（九轮 W8 订正，防与下面第 3 条互相打脸）：这里没做的是**双判式人工对齐**（同题让人工与 judge 逐一比对、
+  算一致率）；下面第 3 条做的是**单向人工抽判**（只取 judge 判"否"的 20 题由人工重判，覆盖判否侧）。
+  两者不是一回事，别混成一句"人工裁决已做"或"人工没做过"。
 - **八轮 V11 零花费扩样后的完整地基**（`scripts/bench_judge_audit.py` 可复跑；判分口径与所有分数**一律未动**）：
   1. **判分实现层**：把该批 500 题落库的 `judge_response` 按官方逐字规则（`'yes' in lower` 为对）
      重推一遍标签，与记的 `label` 逐条比对 → **500/500 一致，0 处分歧**（两批合计 1000 次判分同样 0 处）；

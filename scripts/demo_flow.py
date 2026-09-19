@@ -25,6 +25,7 @@ import argparse
 import os
 import sys
 import threading
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -36,6 +37,17 @@ for _k in ("HIPPOCAMPUS_API_KEY", "DEEPSEEK_API_KEY", "OPENAI_API_KEY", "ANTHROP
 
 ACCOUNT = "demo-flow"
 FACT = "我的期望城市是杭州"
+
+# 三个等待值的定性（九轮 W9，逐条登记在 docs/ci-time-budgets.md）：
+# 就绪轮询真靠「/health 开始应答」这个事件，兜底值只在 uvicorn 永不启动时防挂；
+# 旧写法是「40 次 × 0.25 秒 = 8 秒起不来就报错」——功能性预算，慢机上会假失败。
+READY_DEADLINE_S = 300.0
+READY_POLL_INTERVAL_S = 0.25
+HEALTH_PROBE_TIMEOUT_S = 1
+# 请求超时（对端是本地 HTTP 服务，必须有界；值本身不是断言对象）
+CHAT_REQUEST_TIMEOUT_S = 15
+# 收尾线程 join 的死锁兜底：should_exit 已置位，正常路径 <1 秒；超时即判失败（见下方 is_alive 断言）
+THREAD_JOIN_DEADLINE_S = 300.0
 
 
 def step(name: str, ok: bool, detail: str = "") -> bool:
@@ -117,20 +129,20 @@ def main(argv: list[str] | None = None) -> int:
                 }
                 if token:
                     headers["Authorization"] = f"Bearer {token}"
-                ready = False
-                for _ in range(40):
+                ready_deadline = time.monotonic() + READY_DEADLINE_S
+                while True:
+                    if time.monotonic() >= ready_deadline:
+                        raise RuntimeError(f"代理服务在 {READY_DEADLINE_S:.0f} 秒死锁兜底内未就绪")
                     try:
-                        if httpx.get(f"{base}/health", timeout=1).status_code == 200:
-                            ready = True
+                        if httpx.get(f"{base}/health", timeout=HEALTH_PROBE_TIMEOUT_S).status_code == 200:
                             break
-                    except Exception:
-                        import time
-
-                        time.sleep(0.25)
-                if not ready:
-                    raise RuntimeError("代理服务未在 8 秒内就绪")
+                    except Exception:  # noqa: BLE001 —— 还没开始监听，属正常轮询区间
+                        pass
+                    time.sleep(READY_POLL_INTERVAL_S)
                 body = {"model": "demo", "messages": [{"role": "user", "content": "我的期望城市是哪里？"}]}
-                resp = httpx.post(f"{base}/v1/chat/completions", json=body, headers=headers, timeout=15)
+                resp = httpx.post(
+                    f"{base}/v1/chat/completions", json=body, headers=headers, timeout=CHAT_REQUEST_TIMEOUT_S
+                )
                 text = resp.json().get("choices", [{}])[0].get("message", {}).get("content", "")
                 results.append(step("A3 代理跨会话注入（离线回执列出 chat-1 的事实）",
                                     resp.status_code == 200 and FACT in text,
@@ -138,7 +150,9 @@ def main(argv: list[str] | None = None) -> int:
                 results.append(step("A4 代理服务健康（/health 200）", True, base + "/health"))
             finally:
                 server.should_exit = True
-                t.join(timeout=10)
+                t.join(timeout=THREAD_JOIN_DEADLINE_S)
+                if t.is_alive():
+                    raise RuntimeError(f"代理服务线程未在 {THREAD_JOIN_DEADLINE_S:.0f} 秒内退出（收尾死锁兜底）")
 
     finally:
         core.close()

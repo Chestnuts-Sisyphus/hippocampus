@@ -52,6 +52,7 @@
 | ~~审计/观察文件只增不轮转~~ | **已解决（0.2.1）**：`audit.jsonl`／`observe.jsonl` 到上限滚动（`.1`/`.2`…，保留份数可配 `observability.jsonl_max_bytes`／`jsonl_keep`，默认 8 MiB／3 份）；`explain` 可读滚动份 | 极老的日志会被丢弃（保留份数之外），上限可调 |
 | 审计开销有实测 | `audit_enabled` 开/关实测：**+41.8 ms/次**（p50，1154 记忆规模库）；默认开 | 嫌慢可关（`audit_enabled=false`），代价是 `explain` 看不到超出 top-k 的候选 |
 | ~~冲突确认无 TTL~~ | **已解决（0.2.0）**：pending 块默认 **7 天 TTL**，超时标记"未决冲突"、旧值保持生效；`memory review --pending/--candidates/--suspicious` 三个视图 | — |
+| `/trace` 的 `observe[]` 名义是"这一轮"、实际是**整个账户** | **已收口（九轮 W10）**：八轮 V9 只把这条事实写进文档，本轮给出可用收窄——`?observe=account`（默认，行为不变）／`?observe=run` 在该轮审计时间戳（拿不到则退回 `run_id` 前缀毫秒）前后 50 毫秒内**再筛**，响应回显 `observe_granularity`，非法值 400。钉：`tests/test_n45_r9_trace_granularity.py` ＋ 真机冒烟五条新语义（`scripts/live_management_smoke.py`）。首版实现把 `injection` 事件也放进来，"收窄"反而比默认更宽——被真机冒烟当场判红后改成"只会更少" | 残余：**run 粒度是时间窗近似**，同账户并发多 run 时同窗口事件仍会混入；要精确到 run 得把 `run_id` 穿进记忆层的观察写入点（改协议，另案，未列入本轮） |
 
 ## 五、工程与发布
 
@@ -62,7 +63,10 @@
 | ~~出站口径三处不一致（文档说"仅 https"、代码与测试放行公网 http）~~ | **已收口（九轮 W3）**：`validate_outbound_url` 默认**仅 https**（数据/模型提供的 URL），明文公网出口需显式 `HIPPOCAMPUS_ALLOW_PLAINTEXT_OUTBOUND=1`（**默认关**）；本地模型端点走 `validate_endpoint_url`（允许环回 http，行为不变）。`docs/security.md` §②／`docs/deployment.md` §三第 4 条／`src/hippocampus/net.py` 与 `tests/test_a40_a41_safety.py` 四处同一口径，并由 `tests/test_n40_r9_outbound_policy.py` 做"文档↔实现"逐字核对 | **属默认对外行为变更**：抓取记忆里的 `http://` 链接、指明文公网 API 会直接被拒（要显式开闸）→ 随 v0.5.0 发版 |
 | ~~无导入/导出命令~~ | **已解决（0.2.0）**：`hippocampus export <目录>` / `import <目录>`（目录包含 manifest 与 schema 版本；导入默认不覆盖，`--force` 时旧库留 `.bak` 副本） | — |
 | 演示脚本 | `scripts/demo.sh`／`scripts/demo.ps1`（起代理→灌数据→三格式请求→评测→结果表）；**两版均已实测（2026-09-18）**：`demo.ps1` 修了无 BOM 导致 PowerShell 按 ANSI 解析中文串报语法错的问题（已带 UTF-8 BOM），之后五段全通（doctor→seed→代理 8765→三格式请求→20 题评测 开 20/20／关 6/20／基线 18/20）；**跨会话长任务演示（六轮 G7，2026-09-18）**：`scripts/demo_flow.py` 一键走完三形态（记忆核心/Agent/代理）＋跨会话记忆生效断言（会话 A 写入→会话 B/Agent/代理均复述），4 断言全过（exit 0，离线零凭据，输出样例见结果文档 §十一） | 换系统区域设置（非简体中文）时仍需 BOM 保障 |
-| ~~**单条写入随库规模线性变慢**~~ | **已解决（0.3.0，六轮 T6）**：每次 `write` 原触发**全量**索引同步（1154 规模 p50 **749 ms**，那是修复前口径，见 §6.1 标注）；现改为**增量 upsert**（只同步本轮触碰的新记忆／新经历／被取代项），同规模实测 p50 **42.0 ms** | 残余风险：跨账户长跑仍受会话缓存上限约束（`HIPPOCAMPUS_SESSION_CACHE_MAX`）；极端并发写入下增量与全量的收敛差异靠 `index_health`／`index rebuild` 兜底 |
+| ~~**单条写入随库规模线性变慢**~~ | **已解决（0.3.0，六轮 T6）**：每次 `write` 原触发**全量**索引同步，改为**增量 upsert**（只同步本轮触碰的新记忆／新经历／被取代项）。**成对基线按批引用，不得跨批配对**（九轮 W7 口径）：**批 C**＝2026-09-17 合成库 1154 记忆／2406 实体／6035 关系／497 事件（本文件 §6.1 表）p50 **748.6 ms → 42.0 ms**（同规模同机）；**批 D**＝2026-09-18 五轮 T6 实测（数字正本结果文档 §三，README 性能表照此抄）p50 **632.8 ms → 41.98 ms** | 残余风险：跨账户长跑仍受会话缓存上限约束（`HIPPOCAMPUS_SESSION_CACHE_MAX`）；极端并发写入下增量与全量的收敛差异靠 `index_health`／`index rebuild` 兜底 |
+| ~~数字闸只比对头条分，对照表里的多值不带口径标注~~ | **已解决（九轮 W7）**：规则升级为"同一指标 >1 个数值时，每个值必须带（批次／规模／臂）标注"，覆盖 bge 档对照表与写入"修复前／后"成对基线；上闸前先订正三处归属错（46.5／47.8 串到 instr 臂、`46.3%` 无出处、749／632.8 未配批次），钉：`tests/test_n42_r9_number_table_annotations.py`（植入 `bge-base = 50.0%` 必红） | 本文件 §六 的旧口径表**仍不参与**头条分比对（硬边界：旧口径不与 README 增量口径混写）；口径变更须同日改全处 |
+| ~~文档章节引用指错、待拍板编号两套并存~~ | **已解决（九轮 W8）**：`§2.3` → `§二·三`（README 与 `docs/benchmark.en.md`）、`docs/benchmark.md` 两段自相矛盾的 judge 表述订正、`docs/release-sync.md` §三 补到本轮；`AGENTS.md`／`.qoder/handoff/STATUS.md` 把待拍板正本写成"P1–P5"→ 改回正本实编号 **B1–B10**（P1–P5 是 v0.3.0 发版任务序，**同名不同物**，两套编号并存已注明）。钉：`tests/test_n43_r9_doc_reference_hygiene.py` | 轻闸只校验"仓内 `§` 引用必须命中、跨仓引用只校验文件存在"——跨仓文档的**内容**一致性仍靠人工（见 K17 简历同源，W12） |
+| ~~时间预算台账是手写清单，没有机器校验~~ | **已解决（九轮 W9）**：`docs/ci-time-budgets.md` 补全为逐文件全量表，并新增反向校验闸 `tests/test_n44_r9_time_budget_ledger.py`（扫 `tests/`＋`scripts/` 每个等待点，要求"文件＋秒数"同行，缺行即红；植新等待点与"把值塞进外部常量"两类对照均判红）。按判据改判三处功能性预算：`test_n28` 30 秒（八轮首版判错，已公开更正）、`test_n31` `/run` 20 秒（→ `RUN_TIMEOUT_S`＋审计按 `run_id` 轮询完成标记）、`demo_flow` "8 秒起不来"（→ 兜底内就绪轮询，顺带修"非 200 不 sleep 会热转"） | 残余风险：`src/` 不在闸范围内（产品代码的等待值属运行时配置）；台账只保证"每个等待点都被定性登记"，不保证阈值取值的合理性——取值改动仍需人在评审时判它属哪一类 |
 
 ## 六、实测数字（2026-09-17 · 本机 AMD 7500F／Windows／Python 3.11）
 
@@ -94,10 +98,11 @@
 | LongMemEval-oracle（抽 200） | **神经 ONNX** `bge-small-en-v1.5` | 200 | **100.0%** | 42.5% | 1057 | 74.8 ms |
 | LoCoMo-10（全量） | 默认 `builtin-hash`（词法） | 1986 | **36.7%** | 14.7% | 1611 | 75.5 ms |
 | LoCoMo-10（全量） | **神经 ONNX `bge-small-en-v1.5`** | 1986 | **45.7%** | 17.4% | 1354 | 45.8 ms |
-| LoCoMo-10（全量） | 神经 ONNX `bge-base-en-v1.5` | 1986 | 47.8% | 18.0% | 1432 | 47.0 ms |
+| LoCoMo-10（全量） | 神经 ONNX `bge-base-en-v1.5` | 1986 | 47.8%（批 A：09-17 首轮，k=8） | 18.0% | 1432 | 47.0 ms |
 
 > 后两行差 2.1 pp ≈ 1.1 pp 的标准误的两倍，看着像"大有提升"；但换**同一脚本同参数**再测
-> （`scripts/bench_ablation.py`，k=8／k=20 全量）两档是 **45.2／49.8** vs **46.5／48.8**——
+> （`scripts/bench_ablation.py`，k=8／k=20 全量，下称**批 B**）两档是
+> **小档 `bge-small-en-v1.5` 45.2／49.8** vs **大档 `bge-base-en-v1.5` 46.5／48.8**——
 > 打平。所以推荐档仍是 `bge-small-en-v1.5`；`bge-base-en` 只作为"想试更大模型"的可选项。
 
 选档对照（80 题抽样 A/B，`scripts/bench_ab.py`；**样本小、只看方向**）：

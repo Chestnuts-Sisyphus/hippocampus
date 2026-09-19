@@ -1,6 +1,6 @@
 # Public Benchmark Protocol — Official Judging Arm (English one-pager)
 
-> Companion to `docs/benchmark.md` §2.3 (Chinese full protocol). This page exists so
+> Companion to `docs/benchmark.md` §二·三 (Chinese full protocol; the section numbering there is CJK). This page exists so
 > non-Chinese readers can audit **how the official scores were produced and how to re-run them**.
 > Source of truth for the numbers: the results document (数字正本, cited in `docs/release-sync.md`).
 
