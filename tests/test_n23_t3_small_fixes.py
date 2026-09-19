@@ -160,12 +160,16 @@ def test_shadow_registered_as_observation_track_in_naming_docs():
 def test_round2_gap_a30_3_marked_resolved():
     """A16：二轮缺口清单 A30-3 状态清理为已解决（N14）。
 
-    检查对象是仓库外数字正本（本机路径）——CI  runner 上不存在该路径，跳过；
-    本地全量回归仍会真判（正本状态漂移只有本机能抓）。
+    检查对象是仓库外数字正本（仅本机存在）——路径由 `HIPPOCAMPUS_GAP_LEDGER` 给出，
+    未配置或不存在时跳过；CI 上跳过，本机配置后仍会真判（正本状态漂移只有本机能抓）。
     """
+    import os
     from pathlib import Path
 
-    canonical = Path("D:/AI/求职-天津秋招-202609/投递/Hippocampus-缺口总清单-二轮-20260917.md")
+    configured = os.environ.get("HIPPOCAMPUS_GAP_LEDGER")
+    if not configured:
+        pytest.skip("仓库外缺口清单正本仅本机存在（未配 HIPPOCAMPUS_GAP_LEDGER 则跳过）")
+    canonical = Path(configured)
     if not canonical.exists():
         pytest.skip("仓库外缺口清单正本仅本机存在（CI 跳过）")
     text = canonical.read_text(encoding="utf-8")
