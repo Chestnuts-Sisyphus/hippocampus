@@ -45,3 +45,8 @@ Thumbs.db
 .env
 .env.*
 !.env.example
+
+# 交接与治理文档（本仓为 PUBLIC：内含本机路径、凭据位置登记、内部待拍板项，一律不入库）
+# 纯追加，不影响任何既有规则；如需公开展示工程约定，另写 docs/ 下的脱敏版
+.qoder/
+AGENTS.md
