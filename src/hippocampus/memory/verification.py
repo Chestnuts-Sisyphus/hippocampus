@@ -156,16 +156,38 @@ _L3_CACHE: dict[str, tuple[float, int]] = {}
 _L3_CACHE_TTL_S = 600.0
 
 
-def _probe_url(url: str, timeout_s: float = 5.0) -> int | None:
-    """发一次只读 HEAD（失败退回 GET）。返回状态码；网络异常返回 None（=未取证，不是"假"）。"""
+# HEAD 不被支持／被挡的这几个码**不代表链接是死的**，必须换 GET 复核再定性（否则假判假）
+_HEAD_RETRY_CODES = frozenset({400, 401, 403, 405, 406, 429, 501})
+
+
+def _probe_once(url: str, method: str, timeout_s: float) -> int | None:
+    """发一次只读请求。返回状态码；**传输层**异常（DNS／超时／连接失败）返回 None＝未取证。
+
+    注意 `urlopen` 对 4xx/5xx 抛的是 `HTTPError`——那是"取到证了"，必须把状态码带回去，
+    不能和"没取到证"混成同一个 None（八轮 V10 真机验证逮到的原缺陷正是这个混用，
+    导致死链判假那条分支永远走不到）。
+    """
+    import urllib.error
     import urllib.request
 
-    req = urllib.request.Request(url, method="HEAD", headers={"User-Agent": "hippocampus-verify/1.0"})
+    req = urllib.request.Request(url, method=method, headers={"User-Agent": "hippocampus-verify/1.0"})
     try:
         with urllib.request.urlopen(req, timeout=timeout_s) as resp:  # noqa: S310（URL 已过 validate_outbound_url）
             return int(resp.status)
+    except urllib.error.HTTPError as e:
+        return int(e.code)
     except Exception:
         return None
+
+
+def _probe_url(url: str, timeout_s: float = 5.0) -> int | None:
+    """L3 单次探测：HEAD 优先，被挡或不支持时退回 GET 复核。网络异常 → None（＝未取证，**不是"假"**）。"""
+    code = _probe_once(url, "HEAD", timeout_s)
+    if code is not None and code in _HEAD_RETRY_CODES:
+        retried = _probe_once(url, "GET", timeout_s)
+        if retried is not None:
+            return retried
+    return code
 
 
 def probe_external(url: str) -> int | None:

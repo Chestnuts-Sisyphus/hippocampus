@@ -229,3 +229,88 @@ def test_verification_fields_are_append_only_defaults(home):
         assert params["verification_enabled"] is True and params["verification_external"] is False
     finally:
         core.close()
+
+
+# ---------------- 八轮 V10：L3 探测的状态码语义（真机验证逮到的缺陷回归） ----------------
+
+PROBE_URL = "https://example.com/some/page"
+
+
+class _Resp:
+    def __init__(self, status: int) -> None:
+        self.status = status
+
+    def __enter__(self) -> _Resp:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        return None
+
+
+def _stub_urlopen(monkeypatch, results: list):
+    """按调用顺序吐出响应状态码或异常；同时记录请求方法，便于验证"HEAD 被挡→退 GET"。"""
+    calls: list[str] = []
+
+    def fake(url, timeout=None):  # noqa: ANN001
+        calls.append(getattr(url, "method", "?"))
+        outcome = results[len(calls) - 1] if len(calls) <= len(results) else results[-1]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return _Resp(outcome)
+
+    monkeypatch.setattr("urllib.request.urlopen", fake)
+    return calls
+
+
+def test_http_error_status_is_taken_as_evidence(monkeypatch):
+    """4xx/5xx 是"取到证了"，必须带回状态码——不能和"没取到证"混成同一个 None。"""
+    import urllib.error
+
+    http_404 = urllib.error.HTTPError(PROBE_URL, 404, "Not Found", {}, None)  # type: ignore[arg-type]
+    calls = _stub_urlopen(monkeypatch, [http_404])
+    vmod.clear_external_cache()
+    try:
+        assert vmod.probe_external(PROBE_URL) == 404
+        assert calls == ["HEAD"]
+    finally:
+        vmod.clear_external_cache()
+
+
+def test_transport_error_stays_unprobed_not_refuted(monkeypatch):
+    """DNS／连接失败这类传输层异常 → None＝未取证，**不得**因此判假。"""
+    import urllib.error
+
+    _stub_urlopen(monkeypatch, [urllib.error.URLError("name not resolved")])
+    vmod.clear_external_cache()
+    try:
+        assert vmod.probe_external(PROBE_URL) is None
+        result = vmod.verify(f"资料位置见 {PROBE_URL}", "resource", source="model", external=True)
+        assert result.status != vmod.REFUTED, "未取证被判成假（违反硬边界）"
+        assert "未取证" in result.evidence
+    finally:
+        vmod.clear_external_cache()
+
+
+def test_head_blocked_url_is_retried_with_get(monkeypatch):
+    """HEAD 被挡（405）不代表链接是死的：退回 GET 复核后按 GET 的结果定性，避免假判假。"""
+    calls = _stub_urlopen(monkeypatch, [405, 200])
+    vmod.clear_external_cache()
+    try:
+        assert vmod.probe_external(PROBE_URL) == 200
+        assert calls == ["HEAD", "GET"]
+    finally:
+        vmod.clear_external_cache()
+
+
+def test_dead_url_refutes_when_external_is_on(monkeypatch):
+    """正反对照的另一半：真 404 必须判 refuted（只有"未取证"才宽容）。"""
+    import urllib.error
+
+    _stub_urlopen(monkeypatch, [urllib.error.HTTPError(PROBE_URL, 404, "Not Found", {}, None)])  # type: ignore[arg-type]
+    vmod.clear_external_cache()
+    try:
+        result = vmod.verify(f"资料位置见 {PROBE_URL}", "resource", source="model", external=True)
+        assert result.status == vmod.REFUTED
+        assert "L3:external_probe" in result.method
+    finally:
+        vmod.clear_external_cache()
