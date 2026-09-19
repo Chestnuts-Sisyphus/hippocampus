@@ -117,11 +117,13 @@ def test_locks_kept_when_held_during_eviction(home, monkeypatch):
         def holder():
             with lock.held():
                 entered.set()
-                release.wait(timeout=5)
+                # 兜底只防死锁：持有时长不是本测试的功能性预算（慢 runner 上主线程
+                # 要在窗口里跑数次 core.write，给秒级阈值会假红）
+                release.wait(timeout=300)
 
         t = threading.Thread(target=holder)
         t.start()
-        assert entered.wait(3), "持有线程未进入锁内"
+        assert entered.wait(30), "持有线程未进入锁内"
         # 开更多账户触发逐出（上限 2；held-acc 是"最近用"，先被逐出的会是别人）
         for i in range(2):
             s = Scope(account=f"other-{i}", session="s1", source="user")
@@ -133,7 +135,7 @@ def test_locks_kept_when_held_during_eviction(home, monkeypatch):
             assert "held-acc" in core._locks, "本地仍持有 → 锁对象不得删"
     finally:
         release.set()
-        t.join(timeout=5)
+        t.join(timeout=30)
         core.close()
 
 
