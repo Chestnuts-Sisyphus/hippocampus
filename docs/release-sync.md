@@ -10,21 +10,22 @@
    ```bash
    GIT_ASKPASS='D:/tmp/git-askpass-gh.sh' GIT_TERMINAL_PROMPT=0 git -c credential.helper= push origin main
    ```
-   （垫片如被 D:/tmp 清理需重建：user=x-access-token，pass=KEY/GITHUB-TOKENS.txt 第 11 行。）
+   （垫片如被 `D:/tmp` 清理需重建：用户名 `x-access-token`，口令取**本机凭据登记簿**里具备仓库推送权限的那一条；
+   **登记簿路径与行号不写入本仓任何文档**，只记在本地治理文档里。）
 2. **数字变更时**：同源更新 README 官方分/性能表 ← 结果文档 v（数字正本）＋ `docs/benchmark.md`／
    `docs/roadmap.md`。**数字只在一处定稿（结果文档），其余文件引用并照抄最新值**；改完自查：README 里
-   每个数字都能在结果文档找到同值。检查命令：`grep -nE "70\.5|32\.55|632\.8|41\.98|63\.65" README.md`
-   与结果文档逐值核对。
+   每个数字都能在结果文档找到同值。检查命令：`grep -nE "74\.2|70\.5|32\.55|38\.68|632\.8|41\.98|63\.65" README.md`
+   与结果文档逐值核对（**头条分随正本演进**：LongMemEval 现为全量 500 题 **74.2%**，70.5% 是抽 200 的历史行）。
 3. **按需 tag + Release**（英文 notes，含两个官方分与口径三件套）：每个 tag 前本地全量
    `pytest --basetemp=D:/tmp/pt` 全绿；Release notes = 做了什么 / 数字（带 CI+口径） / 安全 seal。
 4. **description/topics 复核**：仓库名、description、topics 是否与本期成果一致（README 顶部
    对齐 GitTok/Infinigrow 包装时一并检查）。
-5. **数字正本可复跑**：结果文档里的每个新数字必须带复跑命令（`D:/AI/求职-天津秋招-202609/投递/
-   Hippocampus-基准评测结果-20260917.md` 是本地数字正本，仓库侧 `docs/benchmark.md` 是协议正本）。
+5. **数字正本可复跑**：结果文档里的每个新数字必须带复跑命令（**数字正本＝仓库外的本地结果文档，
+   路径不入本仓**；仓库侧 `docs/benchmark.md` 是评测协议正本，两处分工不混写）。
 
 ## 二、同源机制（F2，防两处手写漂移）
 
-- **唯一事实源**：`投递/Hippocampus-基准评测结果-*.md`（本地，数字正本）。README 表、结果文档表、
+- **唯一事实源**：仓库外的本地结果文档（`Hippocampus-基准评测结果-*.md`，数字正本；文件名模式仅内部约定）。README 表、结果文档表、
   会话沉淀三处**必须同值**；任何一处改了数字，另外两处同步改。
 - **官方分口径三件套**（CI/判分模型与 temp/输入＝top-8 注入非全文）在 README 与结果文档各带一份，
   引用时互相指认，不另起炉灶。

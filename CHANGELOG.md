@@ -91,15 +91,15 @@
 
 凭据卫生（T9）：
 
-- `.qoder/handoff/PROMPTS.md:925` 经复核是**扫描器误报**（命中的是普通词 `task-overlay` 里的
-  子串），没有真凭据可打码 → 修的是判据：`scan_credentials.py` 短密钥形状规则补词首边界 `\b`，
+- 本仓之外的一份交接文档（路径与行号不入公开文档）经复核是**扫描器误报**（命中的是普通词
+  `task-overlay` 里的子串），没有真凭据可打码 → 修的是判据：`scan_credentials.py` 短密钥形状规则补词首边界 `\b`，
   并补两侧对照测试 `tests/test_n33_r7_scan_credentials.py`（真 key 形态必命中／普通词与占位行不误报／
   整仓 tracked 零命中）；
-- KEY 母库 `D:/AI/KEY/GITHUB-TOKENS.txt` 以**文末登记表**方式逐把补注 scope 能力面
-  （既有行一字未改，`git-askpass` 垫片取第 2 行长度复核仍是 93 字符，不影响任何按行号取值的读取方）；
-- 顺带测得一条硬边界：**在册凭据没有一把带 `delete_repo`**——母库 5 把逐把试 + **gh 自身 keyring 登录**
-  （`gho_` OAuth，scopes 仅 `gist/read:org/repo`，对该仓 `permissions.admin=true`）共 **6 条路径全 403**，
-  GitHub 回话直指缺 scope（**admin ≠ 可删**）→ 删除动作未执行，待 `gh auth refresh -s delete_repo` 或网页端操作；
+- 本机 GitHub 凭据登记簿（**存放在本仓之外，路径与行号不写入任何公开文档**）以文末登记表方式逐把补注
+  scope 能力面；既有行一字未改，按行号取值的推送垫片不受影响；
+- 顺带测得一条硬边界：**在册各把凭据（含 gh 自身 keyring 登录）逐把真删实测，没有一把拿到删除授权**
+  （缺 `delete_repo` scope，或该仓不在其授权范围内；对目标仓 `permissions.admin=true` 也**不等于可删**）
+  → 删除动作未执行，待 owner 侧补授权或网页端操作；
   T4 **安全闸本身已过且口径拉到最强**：`git fsck --full` 干净、本地 `git ls-tree -r main` 与远端 tree
   **各 77 个 blob、SHA+路径逐字一致（diff 0 行）**、远端无 issues/releases/fork/额外 ref（证据表见沉淀文档附录 C）。
 
@@ -169,7 +169,7 @@ CI 63.8–76.4%；LoCoMo-10 全量 1986：官方 F1 **32.55%**，CI 30.8–34.4%
 
 ### 资料
 
-- 基准结果正本（数字 + CI + 花费 + 复跑命令）：`投递/Hippocampus-基准评测结果-20260917.md`（v2）；
+- 基准结果正本（数字 + CI + 花费 + 复跑命令）：仓库外的本地结果文档（v2，路径不入本仓）；
   官方判分协议：`docs/benchmark.md` §二·三。
 
 ### 已知限制（新增部分，完整清单见 docs/roadmap.md）

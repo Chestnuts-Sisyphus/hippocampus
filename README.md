@@ -67,8 +67,8 @@ p50 **42 ms** (incremental index sync, 2026-09-18; was 632.8 ms with full re-syn
 multi-account memory bounded by an LRU session cache: LME neural benchmark (200 accounts) peak
 RSS **~1.1 GB** (was ~4 GB), evidence recall still 100%.
 
-> **Number source-of-truth (F2):** every figure above is maintained in sync with the results
-> document (数字正本: `本地求职目录/投递/Hippocampus-基准评测结果-20260917.md`, latest re-measurement
+> **Number source-of-truth (F2):** every figure above is kept in sync with the local results
+> document (a private working file, not part of this repository; latest re-measurement
 > 2026-09-18). If a number changes anywhere, update both places the same day — see
 > `docs/release-sync.md` for the exact sync checklist.
 
