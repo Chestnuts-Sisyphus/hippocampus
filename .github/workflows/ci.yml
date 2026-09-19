@@ -214,20 +214,35 @@ jobs:
         # Core-contract files that must hold without the vector/proxy extras (fastapi-backed
         # version gate lives in the full job; listing it here would ImportError on core-only).
         # A subset that silently collects zero tests would also be green, hence a count floor.
+        # Counts come from the JUnit XML, **not** from pytest's prose summary: batch-G lesson --
+        # on non-tty stdout pytest 9 emits no "N passed" line, so regexing prose made this step
+        # structurally unable to go green. `pipefail` closes the second hole: a bare `| tee`
+        # would hand the step's exit code to tee and mask a failing pytest.
         run: |
+          set -o pipefail
           python -m pytest tests/test_a9_memory_crud.py tests/test_memory_core_v1.py \
             tests/test_a40_a41_safety.py tests/test_n40_r9_outbound_policy.py -q \
-            --basetemp="${{ runner.temp }}/pt-core" | tee core_pytest.log
+            --basetemp="${{ runner.temp }}/pt-core" --junit-xml=core_pytest.xml \
+            | tee core_pytest.log
           python - <<'PY'
-          import re
           import sys
+          import xml.etree.ElementTree as ET
 
-          text = open("core_pytest.log", encoding="utf-8", errors="replace").read()
-          nums = [int(n) for n in re.findall(r"(\d+) passed", text)]
-          if not nums or nums[0] < 30:
-              print(f"core-only subset too small (passed={nums}); the subset is not really running")
+          root = ET.parse("core_pytest.xml").getroot()
+          suite = root if root.tag == "testsuite" else root.find("testsuite")
+          tests = int(suite.get("tests") or 0)
+          failures = int(suite.get("failures") or 0)
+          errors = int(suite.get("errors") or 0)
+          skipped = int(suite.get("skipped") or 0)
+          passed = tests - failures - errors - skipped
+          print(f"core-only subset: tests={tests} passed={passed} failures={failures} "
+                f"errors={errors} skipped={skipped}")
+          if passed < 30:
+              print("subset too small -- the core tier is not really being exercised")
               sys.exit(1)
-          print(f"core-only subset ran {nums[0]} tests")
+          if failures or errors:
+              print("core-only subset did not pass clean")
+              sys.exit(1)
           PY
 
   lint:

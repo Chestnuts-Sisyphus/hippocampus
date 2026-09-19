@@ -80,6 +80,42 @@ def test_dropping_pytest_from_core_only_install_turns_the_gate_red():
         _check_core_only_install(planted)
 
 
+SUBSET_STEP_KEY = "Round-9 W4 minimal pytest subset"
+
+
+def _core_only_subset_step(ci: str) -> str:
+    """取 core-only job 里那条"最小 pytest 子集"步骤的正文（该 job 是文件末节）。"""
+    section = ci.split("\n  core-only:", 1)[1]
+    parts = section.split(SUBSET_STEP_KEY, 1)
+    assert len(parts) == 2, "core-only 的最小 pytest 子集步骤不见了：降级档不再被真跑"
+    return parts[1]
+
+
+def _check_core_only_subset(ci: str) -> None:
+    """三条判据：出 JUnit XML、有 `set -o pipefail`、不再正则解析 pytest 文案计数。"""
+    step = _core_only_subset_step(ci)
+    assert "--junit-xml" in step, "子集步骤没出 JUnit XML：计数会退回解析 pytest 文案"
+    assert "set -o pipefail" in step, "子集步骤缺 pipefail：`| tee` 会掩盖 pytest 的失败退出码"
+    assert 'r"(\\d+) passed"' not in step, "子集步骤又回到正则数文案：非 tty 下这行根本不存在"
+
+
+def test_core_only_subset_counts_from_machine_readable_xml():
+    """批次 G 第二个根因：pytest 9 在非 tty（CI）下**不打印** "N passed" 汇总行，
+    于是"正则数文案"的地板永远拿不到数 → 这一步结构上不可能转绿。
+    而 `| tee` 会把 pytest 的失败退出码吞成 0，是另一个假绿口子，故同时钉住 pipefail。
+    """
+    _check_core_only_subset(CI.read_text(encoding="utf-8"))
+
+
+def test_prose_counting_in_the_subset_step_turns_the_gate_red():
+    """植入即红对照：把 junit-xml 换回"数文案"的写法 → 同一条闸必须判红。"""
+    ci = CI.read_text(encoding="utf-8")
+    planted = ci.replace("--junit-xml=core_pytest.xml", "")
+    assert planted != ci, "锚点变了：植入测试没真植入任何东西"
+    with pytest.raises(AssertionError):
+        _check_core_only_subset(planted)
+
+
 def test_synthetic_fixture_satisfies_the_same_assertion_the_guard_makes():
     """夹具必须满足守护测试的**同一条**断言——否则 CI 上跑的是个假样本。"""
     assert FIXTURE.is_file(), "仓内合成夹具被删：CI 会退回永远 skip"

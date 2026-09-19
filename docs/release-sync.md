@@ -64,7 +64,7 @@
 - **治理面（W14）**：六项挂"待"字的条目全部写终态（做／不做＋理由＋可检验的翻案条件），
   去处见 `docs/chroma-client-sharing.md`、`docs/dependency-audit.md`、`docs/security.md` §③、`docs/naming.md` 末节。
 - **发版（W15）**：`v0.5.0`＝`pyproject`／`__version__`／安装元数据／`app.version`／`uv.lock`／CHANGELOG 顶部段
-  **六处同日同步**；README 双语测试计数同日跟到 **606**（由收集真值闸逼出，不手写）；
+  **六处同日同步**；README 双语测试计数同日跟到 **608**（由收集真值闸逼出，不手写）；
   Release 正文同样要过 `--git-text` 那条脱敏口径（不含仓外路径与行号指针）。
 
 ### 五轮（2026-09-18 收口）已同步项
