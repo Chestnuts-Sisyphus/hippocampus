@@ -132,11 +132,13 @@ def _env(home: Path, stub_base_url: str | None) -> dict[str, str]:
 class ProxyProcess:
     """真起 `hippocampus proxy` 子进程；输出落文件；退出时必杀。"""
 
-    def __init__(self, home: Path, stub_base_url: str, *, host: str = "127.0.0.1", extra: list[str] | None = None):
+    def __init__(self, home: Path, stub_base_url: str, *, host: str = "127.0.0.1", extra: list[str] | None = None, allow_remote: bool = False):
         self.home = home
         self.port = free_port()
         self.log_path = home / "proxy.log"
         cmd = [sys.executable, *CLI, "proxy", "--host", host, "--port", str(self.port), *(extra or [])]
+        if allow_remote:
+            cmd.append("--allow-remote")
         self._log = self.log_path.open("w", encoding="utf-8", errors="replace")  # noqa: SIM115  # stop() 里关
         self.process = subprocess.Popen(  # noqa: S603
             cmd,
@@ -146,7 +148,7 @@ class ProxyProcess:
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
         )
-        self.base_url = f"http://127.0.0.1:{self.port}"
+        self.base_url = f"http://{host}:{self.port}"
 
     @property
     def token(self) -> str:
@@ -303,6 +305,32 @@ def run_smoke(root: Path) -> dict:
                 timeout=15,
             )
             out["auth_401_bad_token"] = badtok.status_code == 401
+
+            # 十轮 X17：非环回成功路径——带 --allow-remote 起服后，健康口与模型列表应免鉴权（环回体验不变），但聊天口需鉴权
+            remote_home = root / "home_remote"
+            remote_home.mkdir(parents=True, exist_ok=True)
+            proxy_remote = ProxyProcess(remote_home, stub_url, host="0.0.0.0", allow_remote=True)
+            try:
+                proxy_remote.wait_ready()
+                token_remote = proxy_remote.token
+                if not token_remote:
+                    raise SmokeError(f"远程令牌没生成：{remote_home / 'instance_token'}")
+                hdrs_remote = _hdr(token_remote, account)
+
+                # /health 环回档免鉴权 → 200
+                health_remote_noauth = httpx.get(proxy_remote.base_url + "/health", timeout=15)
+                out["health_remote_200_no_auth"] = health_remote_noauth.status_code == 200
+                # /v1/models 同样免鉴权 → 200
+                models_remote_noauth = httpx.get(proxy_remote.base_url + "/v1/models", timeout=15)
+                out["models_remote_200_no_auth"] = models_remote_noauth.status_code == 200
+                # 聊天口缺令牌 → 401
+                chat_remote_noauth = httpx.post(proxy_remote.base_url + "/v1/chat/completions", json=chat_body(), timeout=15)
+                out["chat_remote_401_no_auth"] = chat_remote_noauth.status_code == 401
+                # 聊天口带令牌 → 200
+                chat_remote_auth = httpx.post(proxy_remote.base_url + "/v1/chat/completions", headers=hdrs_remote, json=chat_body(), timeout=60)
+                out["chat_remote_200_auth"] = chat_remote_auth.status_code == 200
+            finally:
+                proxy_remote.stop()
         finally:
             proxy.stop()
 
@@ -327,6 +355,11 @@ REQUIRED_KEYS = (
     "auth_401",
     "auth_401_bad_token",
     "remote_refused_rc2",
+    # 十轮 X17：非环回成功路径两态
+    "health_remote_200_no_auth",
+    "models_remote_200_no_auth",
+    "chat_remote_401_no_auth",
+    "chat_remote_200_auth",
 )
 
 

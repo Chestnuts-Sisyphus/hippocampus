@@ -179,6 +179,10 @@ def get_security_config() -> dict:
     return {"enabled": bool(cfg.get("enabled", True))}
 
 
+# 十轮 X3：模型口／管理口共用的请求体字节上限默认值（10 MiB）。0 表示显式不承诺上限。
+DEFAULT_MAX_BODY_BYTES = 10 * 1024 * 1024
+
+
 def get_proxy_config() -> dict:
     cfg = get_config().get("proxy") or {}
     bucketing = str(os.environ.get("HIPPOCAMPUS_SESSION_BUCKETING") or cfg.get("session_bucketing") or "day").lower()
@@ -189,7 +193,21 @@ def get_proxy_config() -> dict:
         "port": int(os.environ.get("HIPPOCAMPUS_PORT") or cfg.get("port") or DEFAULT_PORT),
         "confirm_block": bool(cfg.get("confirm_block", True)),
         "session_bucketing": bucketing,
+        # 十轮 X3：请求体字节上限（超限 413）。0 = 不承诺上限（显式关掉这道闸，见 docs/proxy.md §三·五）。
+        "max_body_bytes": _int_env("HIPPOCAMPUS_MAX_BODY_BYTES", cfg.get("max_body_bytes"), DEFAULT_MAX_BODY_BYTES),
     }
+
+
+def _int_env(env_key: str, cfg_value: object, default: int) -> int:
+    """环境变量 → config.json → 默认值；非法值退回默认（与 session_bucketing 同一容错口径）。"""
+    for raw in (os.environ.get(env_key), cfg_value):
+        if raw is None or str(raw).strip() == "":
+            continue
+        try:
+            return max(0, int(str(raw).strip()))
+        except ValueError:
+            continue
+    return default
 
 
 def get_agent_config() -> dict:

@@ -129,6 +129,75 @@ def build_app(
     # 九轮 W2：版本单源——OpenAPI 文档里的版本号跟着包元数据走，不再另写死
     app = FastAPI(title="Hippocampus", version=_pkg_version, docs_url=None, redoc_url=None)
 
+    class BodyTooLargeError(ValueError):
+        """十轮 X3：请求体体积超过 `proxy.max_body_bytes`（由入口转 413）。"""
+
+        def __init__(self, size: int, limit: int) -> None:
+            super().__init__(f"请求体 {size} 字节超过上限 {limit} 字节")
+            self.size = size
+            self.limit = limit
+
+    async def read_json_body(request: Request, limit: int) -> Any:
+        """带体积上限地读 JSON 请求体。
+
+        先看 `content-length`（省掉注定超限的传输），再按流累计**真实**字节数——头里的长度可以谎报，
+        只信头等于没闸。`limit <= 0` ＝运维显式声明"不承诺上限"（口径见 `docs/proxy.md` §三·五）。
+        """
+        declared = str(request.headers.get("content-length") or "").strip()
+        if limit > 0 and declared.isdigit() and int(declared) > limit:
+            raise BodyTooLargeError(int(declared), limit)
+        if limit <= 0:
+            return await request.json()
+        import json
+
+        size = 0
+        chunks: list[bytes] = []
+        async for chunk in request.stream():
+            size += len(chunk)
+            if size > limit:
+                raise BodyTooLargeError(size, limit)
+            chunks.append(chunk)
+        return json.loads(b"".join(chunks).decode("utf-8"))
+
+    def _injected_view(injection: Any) -> list[dict]:
+        return [
+            {"id": i.id, "kind": i.kind, "content": i.content, "score": round(i.score, 4)}
+            for i in (getattr(injection, "items", None) or [])
+        ]
+
+    def _dropped_view(injection: Any) -> list[dict]:
+        return [{"id": d.id, "reason": d.reason, "stage": d.stage} for d in (getattr(injection, "dropped", None) or [])]
+
+    def _consolidate_502(
+        scope: Scope, injection: Any, exc: Exception, *, reply: str = "", form_hint: str = ""
+    ) -> JSONResponse:
+        """固化阶段失败的统一出口（十轮 X1）。
+
+        模型口此前让 `core.consolidate` 抛出的异常穿透成 ASGI **裸 500**（既无 `stage` 也丢掉已完成
+        的注入段），与管理口七轮定的"502＋回带已完成注入段"口径不一致。两形态现在共用这一个出口，
+        判据＝遇"抽取器拿到非 JSON"必须同一状态码、同一形状。
+        """
+        return JSONResponse(
+            status_code=502,
+            content={
+                "error": {
+                    "message": (
+                        f"注入已完成、固化未完成：抽取阶段的模型端点调用失败（{type(exc).__name__}: {exc}）。"
+                        "上游回体不是合法 JSON 时抽取器不猜格式，也不静默降级到规则档；"
+                        "配不到可用端点时才走规则档。" + form_hint
+                    ),
+                    "stage": "consolidate",
+                    "type": "consolidation_failed",
+                },
+                "run_id": getattr(injection, "run_id", ""),
+                "scope": {"account": scope.account, "session": scope.session},
+                "injected": _injected_view(injection),
+                "dropped": _dropped_view(injection),
+                "note": getattr(injection, "note", "") or "",
+                "upstream_reply": reply,
+            },
+        )
+
     @app.get("/health")
     def health(request: Request):
         if health_requires_auth and not _authorized(request):
@@ -165,8 +234,21 @@ def build_app(
         """三种入站格式共用的一条链（识别 → 鉴权 → 注入 → 转发 → 固化 → 追加确认块）。"""
         if not _authorized(request):
             return JSONResponse(status_code=401, content=_unauthorized_body())
+        max_body = int(mem_config.proxy_config().get("max_body_bytes") or 0)
         try:
-            body = await request.json()
+            body = await read_json_body(request, max_body)
+        except BodyTooLargeError as e:
+            # 十轮 X3：体积上限（口径见 docs/proxy.md §三·五）
+            return JSONResponse(
+                status_code=413,
+                content={
+                    "error": {
+                        "message": str(e),
+                        "type": "body_too_large",
+                        "max_body_bytes": e.limit,
+                    }
+                },
+            )
         except Exception as e:
             # 请求体不是合法 JSON（含编码问题）：回 400，不要把解析错误包成 500
             return JSONResponse(
@@ -213,7 +295,10 @@ def build_app(
 
         # [离线档] 不转发，但记忆纪律照常（CI 靠这条不依赖任何 key）
         if offline or upstream is None:
-            turn = core.consolidate(scope, user_text=user_text)
+            try:
+                turn = core.consolidate(scope, user_text=user_text)
+            except Exception as e:  # 十轮 X1：固化失败不再裸 500，与管理口同口径回 502＋已完成注入段
+                return _consolidate_502(scope, injection, e)
             reply = _offline_reply(confirmation, injection, inbound)
             if want_confirm and turn.confirm_block:
                 confirm_text += turn.confirm_block
@@ -274,7 +359,10 @@ def build_app(
             return JSONResponse(status_code=501, content={"error": {"message": str(e), "type": "unsupported_format"}})
 
         # [固化] 响应后提炼（B 轨：模型输出永不进正式记忆）
-        turn = core.consolidate(scope, user_text=user_text, assistant_text=reply)
+        try:
+            turn = core.consolidate(scope, user_text=user_text, assistant_text=reply)
+        except Exception as e:  # 十轮 X1：固化失败不再裸 500，与管理口同口径回 502＋已完成段
+            return _consolidate_502(scope, injection, e, reply=reply)
         if want_confirm and turn.confirm_block:
             confirm_text += turn.confirm_block
 
@@ -316,7 +404,14 @@ def build_app(
         if not _authorized(request):
             return JSONResponse(status_code=401, content=_unauthorized_body())
         try:
-            body = await request.json()
+            body = await read_json_body(request, int(mem_config.proxy_config().get("max_body_bytes") or 0))
+        except BodyTooLargeError as e:
+            return JSONResponse(
+                status_code=413,
+                content={
+                    "error": {"message": str(e), "type": "body_too_large", "max_body_bytes": e.limit}
+                },
+            )
         except Exception as e:
             return JSONResponse(status_code=400, content={"error": {"message": f"请求体不是合法 JSON: {e}"}})
         text = str((body or {}).get("text") or "").strip()
@@ -324,34 +419,14 @@ def build_app(
             return JSONResponse(status_code=400, content={"error": {"message": "缺少 text（这一轮的输入）"}})
         scope = _scope_from(dict(request.headers))
         injection = core.inject_finalize(scope, text)
-        injected = [
-            {"id": i.id, "kind": i.kind, "content": i.content, "score": round(i.score, 4)} for i in injection.items
-        ]
-        dropped = [{"id": d.id, "reason": d.reason, "stage": d.stage} for d in injection.dropped]
+        injected = _injected_view(injection)
+        dropped = _dropped_view(injection)
         try:
             turn = core.consolidate(
                 scope, user_text=text, assistant_text=str((body or {}).get("assistant_text") or "")
             )
-        except Exception as e:
-            # 固化阶段的抽取会按当前配置用模型端点（有凭据即出站）；端点报错不能让整条
-            # 链路裸 500——回 502 并带上**已完成的注入结果**，让调用方看得懂断在哪一段。
-            return JSONResponse(
-                status_code=502,
-                content={
-                    "error": {
-                        "message": (
-                            f"注入已完成、固化未完成：抽取阶段的模型端点调用失败（{type(e).__name__}）。"
-                            "管理口不转发对话上游，但记忆抽取按配置使用模型端点；配不到可用端点时走规则档。"
-                        ),
-                        "stage": "consolidate",
-                    },
-                    "run_id": injection.run_id,
-                    "scope": {"account": scope.account, "session": scope.session},
-                    "injected": injected,
-                    "dropped": dropped,
-                    "note": injection.note,
-                },
-            )
+        except Exception as e:  # 十轮 X1：固化失败不再裸 500，与管理口同口径回 502＋已完成段
+            return _consolidate_502(scope, injection, e, form_hint=" 管理口不转发对话上游，但记忆抽取按配置使用模型端点；配不到可用端点时走规则档。")
         return {
             "run_id": injection.run_id,
             "scope": {"account": scope.account, "session": scope.session},
