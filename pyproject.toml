@@ -83,9 +83,8 @@ ignore = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "-q"
-markers = [
-  "slow: 慢测试（可选跳过）",
-  "needs_vector: 需要 chromadb 向量索引",
-  "needs_agent: 需要 langgraph/langchain",
-]
+# 九轮 W4：`--strict-markers` 让拼错的标记直接报错；`xfail_strict` 让"预期失败"必须真失败
+# （否则 xfail 悄悄变成 xpass＝假绿）。marker 只声明真在用的（历史遗留的 slow/
+# needs_vector/needs_agent 三个从未被引用，已删声明）。
+addopts = "-q --strict-markers"
+xfail_strict = true

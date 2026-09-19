@@ -95,6 +95,7 @@ def build_app(
     upstream: Any = None,
     auth_token: str | None = None,
     health_requires_auth: bool = False,
+    models_requires_auth: bool = False,
 ):
     """构造 FastAPI 应用。
 
@@ -107,6 +108,9 @@ def build_app(
 
     `health_requires_auth`：八轮 V8。`/health` 自 0.1.0 起免鉴权（进程活着＋索引健康），
     环回档维持原样；服务形态绑到**非环回**时必须置 True——回体里的 stats／索引／锁是实质信息面。
+
+    `models_requires_auth`：九轮 W1，与上一条同口径。`/v1/models` 回的是**配置的模型名**
+    （本机装了哪个上游），两形态绑到非环回时同样必须带令牌；环回档免鉴权不变。
     """
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse, StreamingResponse
@@ -120,7 +124,10 @@ def build_app(
         header = request.headers.get("authorization", "")
         return header == f"Bearer {auth_token}" or header == auth_token
 
-    app = FastAPI(title="Hippocampus", version="0.1.0", docs_url=None, redoc_url=None)
+    from hippocampus import __version__ as _pkg_version
+
+    # 九轮 W2：版本单源——OpenAPI 文档里的版本号跟着包元数据走，不再另写死
+    app = FastAPI(title="Hippocampus", version=_pkg_version, docs_url=None, redoc_url=None)
 
     @app.get("/health")
     def health(request: Request):
@@ -141,12 +148,16 @@ def build_app(
         }
 
     @app.get("/v1/models")
-    def models() -> dict[str, Any]:
+    def models(request: Request) -> dict[str, Any]:
         """回**配置的**模型名（部分客户端会校验列表；占位串会让它们拒用）。
 
         顺序：`llm.model`（或 `HIPPOCAMPUS_MODEL`／`OPENAI_MODEL`）→ 内置默认名。
         注意列表里回的是"本代理接受并转发的模型名"，上游真实模型仍由 `llm.api_mode` 决定。
+
+        鉴权（九轮 W1）：`models_requires_auth` 为真（= 绑到非环回）时与 `/health` 同口径要令牌。
         """
+        if models_requires_auth and not _authorized(request):
+            return JSONResponse(status_code=401, content=_unauthorized_body())
         name = mem_config.endpoint_model() or "hippocampus"
         return {"object": "list", "data": [{"id": name, "object": "model", "owned_by": "local"}]}
 
@@ -497,10 +508,27 @@ def make_upstream():
     return _upstream
 
 
-def serve(*, host: str, port: int, home: str | Path | None = None, confirm_block: bool = True, offline: bool = False) -> int:
-    """起服务。离线档不需要任何凭据；在线档从环境变量／密钥服务取凭据。"""
+def serve(
+    *,
+    host: str,
+    port: int,
+    home: str | Path | None = None,
+    confirm_block: bool = True,
+    offline: bool = False,
+    allow_remote: bool = False,
+) -> int:
+    """起服务。离线档不需要任何凭据；在线档从环境变量／密钥服务取凭据。
+
+    安全默认（九轮 W1，与 `serve_management` 同口径）：默认只绑环回；要绑非环回必须
+    显式 `allow_remote=True` **且**拿得到实例令牌，否则不起。非环回时 `/health` 与
+    `/v1/models` 这两个探针口同样要令牌（环回档维持免鉴权）。
+    """
     import uvicorn
 
+    loopback = host in _LOOPBACK_HOSTS
+    if not loopback and not allow_remote:
+        print(f"拒绝启动：代理形态默认只绑环回，收到 host={host}。确认要暴露到非环回请显式加 --allow-remote。")
+        return 2
     core = MemoryCore(home=home)
     use_offline = offline or mem_config.is_offline()
     upstream = None if use_offline else make_upstream()
@@ -509,7 +537,18 @@ def serve(*, host: str, port: int, home: str | Path | None = None, confirm_block
         upstream = None
     # A2：实例令牌首次启动生成并落盘（之后复用）；doctor 显示前 8 位
     token = mem_config.instance_token(create=True)
-    app = build_app(core, confirm_block=confirm_block, offline=upstream is None, upstream=upstream)
+    if not token and not loopback:
+        print("拒绝启动：非环回绑定必须有实例令牌，但当前环境拿不到令牌文件。")
+        core.close()
+        return 2
+    app = build_app(
+        core,
+        confirm_block=confirm_block,
+        offline=upstream is None,
+        upstream=upstream,
+        health_requires_auth=not loopback,
+        models_requires_auth=not loopback,
+    )
     print(f"Hippocampus 代理形态监听 http://{host}:{port}")
     print("  支持三种入站：/v1/chat/completions（OpenAI Chat）、/v1/responses（Responses）、"
           "/v1/messages（Anthropic Messages）")
@@ -518,7 +557,8 @@ def serve(*, host: str, port: int, home: str | Path | None = None, confirm_block
         print(f"  实例令牌已启用（前 8 位 {token[:8]}…）：请求带 `Authorization: Bearer <完整令牌>`")
     else:
         print("  实例令牌：未启用（无令牌环境）")
-    print("  把客户端的 base_url 指到 http://host:port 即可；/health 可查格式、端口、锁、索引。")
+    print("  把客户端的 base_url 指到 http://host:port 即可；/health 可查格式、端口、锁、索引"
+          + ("（非环回：`/health` 与 `/v1/models` 同样要令牌）" if not loopback else "（环回免鉴权）"))
     try:
         uvicorn.run(app, host=host, port=port, log_level="warning")
     finally:

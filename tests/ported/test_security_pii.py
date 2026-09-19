@@ -260,7 +260,7 @@ def _make_state_db(messages: list[tuple[str, str, str]]) -> str:
     return path
 
 
-@pytest.mark.xfail(reason="前身导入器（import_runner）不在本项目范围：它的对象是前身的产品化导入流水线", strict=False)
+@pytest.mark.xfail(reason="前身导入器（import_runner）不在本项目范围：它的对象是前身的产品化导入流水线", strict=True)
 def test_import_pii_zero_memories(tmp_path, monkeypatch):
     src = _make_state_db([("s1", "user", f"我的身份证号是 {ID_CARD}")])
     monkeypatch.setattr("hippocampus.memory.account.get_account_data_dir", lambda aid: tmp_path / aid)
@@ -286,7 +286,7 @@ def test_import_pii_zero_memories(tmp_path, monkeypatch):
     Path(src).unlink(missing_ok=True)
 
 
-@pytest.mark.xfail(reason="前身导入器（import_runner）不在本项目范围：它的对象是前身的产品化导入流水线", strict=False)
+@pytest.mark.xfail(reason="前身导入器（import_runner）不在本项目范围：它的对象是前身的产品化导入流水线", strict=True)
 def test_import_key_zero_memories_real_extract(tmp_path, monkeypatch):
     src = _make_state_db([("s1", "user", SK_KEY)])
     monkeypatch.setattr("hippocampus.memory.account.get_account_data_dir", lambda aid: tmp_path / aid)
@@ -302,7 +302,7 @@ def test_import_key_zero_memories_real_extract(tmp_path, monkeypatch):
     Path(src).unlink(missing_ok=True)
 
 
-@pytest.mark.xfail(reason="前身导入器（import_runner）不在本项目范围：它的对象是前身的产品化导入流水线", strict=False)
+@pytest.mark.xfail(reason="前身导入器（import_runner）不在本项目范围：它的对象是前身的产品化导入流水线", strict=True)
 def test_import_assistant_shadow_and_user_pending(tmp_path, monkeypatch):
     """导入补 assistant：episodes 含 assistant；来源记忆 shadow=1；user 偏好仍 pending。"""
     src = _make_state_db(

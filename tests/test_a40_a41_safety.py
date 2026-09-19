@@ -16,7 +16,12 @@ import pytest
 
 from hippocampus.core import MemoryCore, Scope
 from hippocampus.core.locks import WriterBusy, WriterLock
-from hippocampus.net import UnsafeURLError, validate_endpoint_url, validate_outbound_url
+from hippocampus.net import (
+    PLAINTEXT_OUTBOUND_ENV,
+    UnsafeURLError,
+    validate_endpoint_url,
+    validate_outbound_url,
+)
 
 PLACEHOLDER_KEY = "placeholder-not-a-real-credential"
 
@@ -114,9 +119,33 @@ def test_outbound_url_rejects_unsafe(url):
         validate_outbound_url(url)
 
 
-@pytest.mark.parametrize("url", ["https://example.com/a", "http://example.com:8080/b"])
-def test_outbound_url_allows_public_http(url):
+@pytest.mark.parametrize("url", ["https://example.com/a", "https://example.com:8443/b"])
+def test_outbound_url_allows_public_https(url):
     assert validate_outbound_url(url) == url
+
+
+def test_public_plaintext_http_is_rejected_by_default():
+    """九轮 W3（K4）：出站通道**默认仅 https**——公网明文 http 被拒（旧断言把这条当合法放行）。"""
+    with pytest.raises(UnsafeURLError):
+        validate_outbound_url("http://example.com:8080/b")
+
+
+def test_plaintext_public_egress_needs_explicit_switch(monkeypatch):
+    """显式开关开→公网 http 放行；不开（默认）→ 拒。开关只在出站通道生效，不影响环回拦截。"""
+    monkeypatch.delenv(PLAINTEXT_OUTBOUND_ENV, raising=False)
+    with pytest.raises(UnsafeURLError):
+        validate_outbound_url("http://example.com/b")
+    monkeypatch.setenv(PLAINTEXT_OUTBOUND_ENV, "1")
+    assert validate_outbound_url("http://example.com/b") == "http://example.com/b"
+    # 开关不放宽地址面：环回/私有照旧拒
+    with pytest.raises(UnsafeURLError):
+        validate_outbound_url("http://169.254.169.254/latest/meta-data/")
+
+
+def test_local_model_endpoint_still_works_over_http():
+    """九轮 W3：本地模型端点走 `validate_endpoint_url`，环回 http 仍是合法用法（不受 W3 影响）。"""
+    assert validate_endpoint_url("http://127.0.0.1:11434/v1") == "http://127.0.0.1:11434/v1"
+    assert validate_endpoint_url("http://localhost:8000/v1/chat/completions")
 
 
 def test_endpoint_url_allows_loopback_but_not_other_schemes():

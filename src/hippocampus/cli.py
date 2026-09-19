@@ -201,7 +201,13 @@ def cmd_proxy(args: argparse.Namespace) -> int:
 
     cfg = mem_config.get_proxy_config()
     port = args.port or cfg["port"]
-    return serve(host=args.host or cfg["host"], port=port, home=args.home, confirm_block=not args.no_confirm_block)
+    return serve(
+        host=args.host or cfg["host"],
+        port=port,
+        home=args.home,
+        confirm_block=not args.no_confirm_block,
+        allow_remote=args.allow_remote,
+    )
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
@@ -538,9 +544,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", help="把结果写到该路径（JSON）")
     p.set_defaults(func=cmd_demo)
 
-    p = sub.add_parser("proxy", help="代理形态：OpenAI 兼容端点")
+    p = sub.add_parser("proxy", help="代理形态：OpenAI 兼容端点（默认只绑环回＋实例令牌）")
     p.add_argument("--port", type=int)
-    p.add_argument("--host")
+    p.add_argument("--host", help="监听地址（默认取配置，环回）")
+    p.add_argument("--allow-remote", action="store_true", help="确认要绑到非环回地址（必须有实例令牌）")
     p.add_argument("--no-confirm-block", action="store_true", help="关闭确认块追加")
     p.set_defaults(func=cmd_proxy)
 
