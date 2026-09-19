@@ -43,8 +43,13 @@ HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-small-en-v1.5" \
 
 | Benchmark | Official score (95% CI) | Same-run retrieval (evidence / answer in context) |
 |---|---|---|
-| LongMemEval-oracle (n=200) | **70.5% (63.8%–76.4%, Wilson)** | 100.0% / 48.5% |
+| LongMemEval-oracle (**n=500**, full) | **74.2% (70.2%–77.8%, Wilson)**, 0 failures / 0 skipped | 99.6% / 40.0% |
+| LongMemEval-oracle (n=200, earlier sample — kept as history) | 70.5% (63.8%–76.4%, Wilson) | 100.0% / 48.5% |
 | LoCoMo-10 (n=1986) | **F1 32.55% (30.8%–34.4%, bootstrap)** | 45.5% / 17.4% |
+| LoCoMo-10 + `--neighbors` (n=1986) | **F1 38.68% (36.8%–40.5%, bootstrap)** | 63.7% / 22.7% |
+
+Each row's retrieval figures belong to **that** batch only — do not mix the n=500 and n=200
+LongMemEval rows when citing.
 
 Cost: ≈¥4.76 estimated total (three batches, 4386 calls); budget guard ¥30.
 Decision gate to publish: LME accuracy ≥50% **and** LoCoMo F1 ≥15% — both pass, publish with the

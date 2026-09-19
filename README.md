@@ -44,12 +44,15 @@ the official repositories (pinned revisions, see `docs/benchmark.md` §2.3).
 
 | Benchmark | Official metric | Result (95% CI) | n |
 |---|---|---|---|
-| LongMemEval-oracle | LLM-judged accuracy (official judge prompts) | **70.5% (63.8%–76.4%, Wilson)** | 200 (sampled) |
+| LongMemEval-oracle | LLM-judged accuracy (official judge prompts) | **74.2% (70.2%–77.8%, Wilson)** | 500 (full) |
+| LongMemEval-oracle (earlier sampled run) | same official judging | 70.5% (63.8%–76.4%, Wilson) | 200 (sampled; kept as history, statistically compatible) |
 | LoCoMo-10 | Official F1 (Porter-stemmed token F1, official eval script) | **32.55% (30.8%–34.4%, bootstrap)** | 1986 (full) |
 | LoCoMo-10 + `--neighbors` (±1-turn expansion) | same official F1 | **38.68% (36.8%–40.5%, bootstrap)** | 1986 (full) |
 
-Same-run retrieval metrics (evidence-in-context / answer-in-context): LongMemEval **100.0%** /
-48.5%; LoCoMo **45.5%** / 17.4% baseline, **63.7%** / 22.7% with the neighbor-expansion arm
+Same-run retrieval metrics (evidence-in-context / answer-in-context): LongMemEval **99.6%** /
+40.0% on the full 500-question batch (0 failures, 0 skipped) and 100.0% / 48.5% on the earlier
+200-question sample (different batches, do not mix); LoCoMo **45.5%** / 17.4% baseline,
+**63.7%** / 22.7% with the neighbor-expansion arm
 (`--neighbors`; with neural embedding `bge-small-en-v1.5`; default zero-download lexical tier: 36.7%).
 
 > **Honest footnotes (do not skip when citing):** the model arm uses `deepseek-chat` at

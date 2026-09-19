@@ -118,6 +118,23 @@ HIPPOCAMPUS_OFFLINE=1 HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-base-en-v1.5"
 选出的注入上下文（top-8，`inject_finalize` 原文）**——这正是要测的东西（记忆系统选得
 对不对），所以我们的数字**不与全文基线直接等同**，要同表、带脚注地比。
 
+**实测结果（官方判分臂，2026-09-18 批次；全部取自既有报告 JSON，零新花费）**
+
+| 基准 | 题量 | 官方分（95% CI） | 同批检索（证据命中／答在文内） | 花费（估算／余额可见） |
+|---|---|---|---|---|
+| LongMemEval-oracle | **全量 500** | **74.2%（70.2%–77.8%，Wilson）**，0 失败 0 跳过 | 99.6%／40.0% | ≈¥1.104／¥0 |
+| LongMemEval-oracle（早先抽样批，留作口径历史） | 抽 200 | 70.5%（63.8%–76.4%，Wilson） | 100.0%／48.5% | ≈¥0.45／¥0.39 |
+| LoCoMo-10（基线） | 全量 1986 | F1 **32.55%（30.8%–34.4%，bootstrap）** | 45.52%／17.37% | ≈¥3.87／滞后未显 |
+| LoCoMo-10 + `--neighbors` | 全量 1986 | F1 **38.68%（36.8%–40.5%，bootstrap）** | 63.65%／22.7% | 同批 |
+
+- LME 分型（全量 500，官方 judge 口径）：knowledge-update 84.6（n=78）、temporal-reasoning 76.7（n=133）、
+  multi-session 62.4（n=133）、single-session-assistant 41.1（n=56）、single-session-preference 96.7（n=30）、
+  single-session-user 97.1（n=70）。
+- judge 一致性标定（同题双判 50 题，deepseek-chat ↔ glm-4-flash）：**分歧率 8.0%（4/50）**，4 条都是
+  "deepseek 判错／glm 判对"形态 → 本表官方分统一标注为 **deepseek-judge 口径**（人工裁决未做，不假装已做）。
+- **两批 LME 不同源**（n=500 与 n=200 的检索与花费各自成行），引用时**不要混用**；CI 统计相容
+  （70.2–77.8 ⊃ 70.5），全量批 CI 更窄，故以 74.2% 为头条。
+
 ```bash
 # 需要环境变量：HIPPOCAMPUS_API_KEY（或密钥服务）、HIPPOCAMPUS_BASE_URL、HIPPOCAMPUS_MODEL
 # 护栏（写死在实现里，可调）：并发 16、失败重试 2、单调用超时 120 s、预算 ¥30 硬停
