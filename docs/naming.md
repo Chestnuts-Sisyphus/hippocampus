@@ -47,6 +47,29 @@ netstat -ano | grep -E ":8765\b" || echo "8765 free"
 
 > 端口实测为本机口径（`netstat` 只看本机）；换机复跑同法。
 
+## PyPI：为什么至今不发，真要发需要哪三步（九轮 W14 终态，可对外引用）
+
+**终态＝不发布到 PyPI（维持 `hippocampus-agent` 这个名字占位不动）**。理由三条，按优先级：
+
+1. **它不是缺功能，是缺分发需求**：当前所有使用方（本人本机、CI、评测脚本）都走
+   `pip install git+https://...` 或源码安装，一条命令即可；发 PyPI 不解决任何已知问题。
+2. **发布即不可撤回承诺**：PyPI 不允许覆盖同名版本，删版也留痕；在接口还在按轮次演进
+   （`MemoryCore` v1 只承诺"只追加"）的阶段挂上公共版本索引，等于把"任何一次 `pip install -U`"
+   变成对外兼容性承诺，收益不匹配。
+3. **命名占位已完成**：分发名 `hippocampus-agent` 在 PyPI 实测 `404`（可用）——占住它即可防抢注，
+   与"发不发布"是两件独立的事。
+
+**真要发布，三步（顺序即检查清单）**：
+
+| 步 | 做什么 | 判据（不满足就别发） |
+|---|---|---|
+| 1 | 版本与产物自证：`pyproject` 版本＝`__version__`＝`uv.lock` 根包＝CHANGELOG 顶部段（六处一致，`tests/test_n39_r9_version_single_source.py` 已钉） | 该闸绿＋`hippocampus --version` 与 pyproject 一致 |
+| 2 | 干净环境安装验证：新建 venv `pip install dist/*.whl` 后跑 `hippocampus doctor` 与最小 pytest 子集（含无 chromadb 的降级档） | 装得上、CLI 起得来、降级档有名有姓不崩 |
+| 3 | 凭据与隐私扫描全绿后，才用 **API token（scoped to this project，非账号主凭据）** 执行 `uv publish` | `scan_credentials.py`＋`scan_public_leak.py --git-text` 均零命中/不超基线 |
+
+**翻案触发条件**：出现"外部使用者要求 `pip install` 直装"的真实场景（例如简历项目被面试官/同事上手试用），
+此时按上表三步走，且首发版本号与既有 git tag 对齐（不从 `0.0.x` 另起一套）。
+
 ## 四、术语与代码列对照（A8/A9 登记，2026-09-18）
 
 代码列名 **不等于** 用户可见口径，这里登记映射，避免文档与代码各说各话：
