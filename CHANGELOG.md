@@ -74,6 +74,19 @@
   `trace_observe_run_echo`／`trace_observe_run_narrowed`／`trace_400_observe`）。
   **第一版实现被真机冒烟当场判红**：它把 `injection` 事件也放进 run 粒度，结果"收窄"反而比默认更宽 →
   改成"在默认结果之上再筛，只会更少"；口径与近似性（并发同窗口仍会混入）写在 `docs/deployment.md` §二·五。
+- **W11 老库迁移真机测试（顺带修掉一个真缺陷）**：新增 `tests/test_n46_r9_legacy_migration.py`，legacy 夹具
+  由**现行** `database.SCHEMA` 当场减去"后加列／后建表"派生（不放二进制老库——那玩意儿正本一改就悄悄过期；
+  也不落任何本机绝对路径），断言链：缺列缺表 → 一打开就补齐且老行吃到新列默认值 → 二次打开结构一字不差
+  （幂等、老行不翻倍、快照不重种）→ 老库落在 `home/accounts/<safe_id>/memory.db` 后经 `MemoryCore` 真读真写。
+  **真机测试一上就当场逮到既有缺陷并已修**：`core/backend.py` 的词法档 `lexical_session` 手抄了一份**停在
+  `ensure_security_schema` 的过时序列**，漏了七轮求证四列与 `pending_blocks` 表——老库经词法档（无 chromadb
+  环境即 CI core-only 的默认档）打开后**一写就 `no column named verification_status`**；改为与 `MemorySession`
+  同走 `apply_migrations` 这唯一入口（`database.py` 注释里"以后新增 ensure_* 只改这一处"说的就是这场漂移），
+  并加"**两档迁移终点必须一致**"闸防再各抄一份。`transfer` 的跨版本拒绝文案钉死（必须含两个版本号＋指向
+  CHANGELOG，且拒绝发生在落盘之前），配"同版本必须放行"对照防闸变常闭。
+  **验收口径订正（公开改判）**：任务书写"schema_version 前后断言可见"——库内**没有**版本号字段
+  （`PRAGMA user_version` 全程未使用；补它＝动 accounts schema，撞硬边界），故"前后"用**可见的结构差异**断言，
+  真正的版本号在导出包 manifest（`transfer.SCHEMA_VERSION = 1`）。
 - **CI 实测后的两处补记（批次 A 的 CI 红点，逐 job 交账后单独修）**：
   ①`test_n18_release.py` 的"CI 不得依赖常驻代理进程"用**全文文本**匹配 `hippocampus proxy`，
   被 W6 那条**英文注释**撞红（本地全绿、CI 五个 job 全红）→ 判据收窄到"只认 `run:` 命令行"，

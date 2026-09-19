@@ -70,14 +70,11 @@ def lexical_session(account_id: str, data_dir: Path) -> mb.MemorySession:
     session.lock = threading.RLock()
     conn = sqlite3.connect(str(session.db_path), check_same_thread=False)
     conn.row_factory = sqlite3.Row
-    conn.executescript(db.SCHEMA)
-    db.ensure_b2_schema(conn)
-    db.seed_initial_snapshot(conn)
-    db.ensure_event_time_param(conn)
-    db.ensure_retrieval_params(conn)
-    db.ensure_injection_params(conn)
-    db.ensure_learning_params(conn)
-    db.ensure_security_schema(conn)
+    # [HIPPO] 九轮 W11：这里原先手抄了一份"到 security 为止"的序列，漏了求证四列与
+    # pending_blocks——老库经词法档打开后一写就 `no column named verification_status`。
+    # 与 `MemorySession` 同走 `apply_migrations` 这唯一入口（`database.py` 的注释早就写了"以后
+    # 新增 ensure_* 只改这一处"，本档正是那条注释说的漂移）。
+    db.apply_migrations(conn)
     session.conn = conn
     session.collections = {"mem": None, "ep": None}
     session.collection = None

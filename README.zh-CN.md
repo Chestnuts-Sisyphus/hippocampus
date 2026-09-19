@@ -157,7 +157,7 @@ export HIPPOCAMPUS_BASE_URL=https://api.deepseek.com   # 可选，也可写在 c
 ## 验证自己跑一遍
 
 ```bash
-python -m pytest tests/ -q            # 597 条（含模型臂 21 条；C 盘紧张时加 --basetemp=D:/tmp/pt）
+python -m pytest tests/ -q            # 604 条（含模型臂 21 条；C 盘紧张时加 --basetemp=D:/tmp/pt）
 python scripts/check_interface.py     # MemoryCore v1 契约（scope 第一参数／无 HTTP 字段／只追加）
 python scripts/audit_deps.py          # 依赖审计：全局单例残留必须为 0
 python scripts/scan_credentials.py    # 凭据扫描：零命中
