@@ -3,9 +3,65 @@
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)；
 `MemoryCore` 接口自 v1 起**只允许追加字段**（见 `docs/memory-core-v1.md`）。
 
+## [Unreleased]（九轮 安全面补齐与门禁扩容）
+
+> 本段随下一个 tag 发布（W15）。**含两处默认对外行为变更**（非环回部署会受影响），故按 SemVer 取 minor。
+
+安全面：
+
+- **W1 模型口（代理形态）鉴权补齐**：`serve()` 与管理口同口径——非环回必须显式 `--allow-remote`
+  **且**有实例令牌，否则拒起（退出码 2）；非环回时 `/health` 与 `/v1/models` 也要令牌（新增
+  `models_requires_auth` 形参）。环回档行为一字未改。`hippocampus proxy` 新增 `--allow-remote`。
+  钉：`tests/test_n38_r9_proxy_auth.py`（接线＋行为＋CLI 透参）；口径见 `docs/deployment.md` §一与 §二·五。
+- **W3 出站口径归一**：`validate_outbound_url`（数据/模型提供的 URL）**默认仅 https**，明文公网出口需
+  显式 `HIPPOCAMPUS_ALLOW_PLAINTEXT_OUTBOUND=1`（默认关）；本地模型端点走 `validate_endpoint_url`
+  （允许环回 http，行为不变）。旧测试里"公网 http 放行"的反向断言已改判（`test_a40_a41_safety.py`）。
+  文档／代码／测试三处一致由 `tests/test_n40_r9_outbound_policy.py` 核对。
+
+版本与分发：
+
+- **W2 版本单源**：`hippocampus.__version__` 改读安装元数据（此前长期停在 0.2.1，`--version` 打印旧值）；
+  FastAPI `app.version` 同源（此前写死 0.1.0）。新增六处一致闸（`pyproject`／`__version__`／
+  `importlib.metadata`／`app.version`／`uv.lock` 根包／CHANGELOG 顶部段）＋"改一处必红"对照，
+  纪律文本"四处／五处"归一为"六处"。钉：`tests/test_n39_r9_version_single_source.py`。
+
+真机验证：
+
+- **W6 模型口真机冒烟进 CI**：新增 `scripts/live_proxy_smoke.py`——真起 `hippocampus proxy` 子进程
+  （随机空闲端口、独立数据根、服务端输出**落文件不接 PIPE**、上游是**环回 http 桩**、零出站零真凭据），
+  断言三向入站（chat／responses／messages）200 且有内容、环回 `/health` 与 `/v1/models` 200、
+  缺令牌与错令牌 401、`--host 0.0.0.0` 不带 `--allow-remote` 真进程拒起（rc=2 且端口未占），
+  收尾 psutil 查残留。本机实测 **rc=0、五类语义全命中、残留 0**（产物 `D:/tmp/hc9/smoke1/out.json`）。
+  **冒烟当场逮到一处既有缺陷（本轮只登记不修，见 `docs/roadmap.md` §二）**：上游回体不是合法 JSON 时，
+  模型口的轮末固化抛 `ValueError` → ASGI **裸 500**（`Internal Server Error`，不带 stage 信息）；
+  管理口在七轮已兜成 **502＋回带已完成注入段**，两形态此处口径不一致。
+  复现：把 `hippocampus proxy` 的上游指向一个回纯文本的端点 → `POST /v1/chat/completions` → 500。
+
+门禁与假绿：
+
+- **W4 假绿清剿**：①CI 用仓内合成夹具 `tests/fixtures/gap_ledger_synthetic.md` 注入
+  `HIPPOCAMPUS_GAP_LEDGER`，让正本漂移守护**真跑**（此前每次 CI 都 skip＝绿得没意义）；
+  ②`xfail_strict=true`＋`--strict-markers`，随迁三条 xfail 转 strict（xpass 不再算绿）；
+  ③core-only job 补最小 pytest 子集＋用例数下界＋"chromadb 必须缺席／降级档有名有姓"显式断言；
+  ④删掉三个从未被引用的 marker 声明。钉：`tests/test_n41_r9_ci_honesty.py`（每项带"植入即红"）。
+- **W5 公开面扩到三个出口**：`scan_public_leak.py --git-text` 加扫提交信息／标签注解／Release 正文；
+  公开仓历史不改写（八轮 V2），历史既有命中记为基线 `GIT_TEXT_BASELINE = 2`（实测出自 `2419926`
+  那条 message），**只减不增**——新写一条线索即红。CI 步骤已改用 `--git-text`；
+  出口清单见 `docs/security.md` §⑦·五。
+
+复跑：
+
+```bash
+uv run python -m pytest tests/ -q --basetemp=D:/tmp/pt
+uv run ruff check src tests scripts
+uv run python scripts/scan_public_leak.py --git-text
+```
+
 ## [0.4.0] — 2026-09-19（八轮 安全面与发布收口 ＋ 七轮工程完善）
 
-> **版本四处一致**：`pyproject.toml` = 0.4.0 ／ 本段 ／ tag `v0.4.0` ／ GitHub Release `v0.4.0`
+> **版本六处一致**（九轮 W2 归一口径，机器闸 `tests/test_n39_r9_version_single_source.py` 核对）：
+> `pyproject.toml` = `hippocampus.__version__`（改读安装元数据）= `importlib.metadata`
+> = FastAPI `app.version` = `uv.lock` 根包 = 本段，另有两个发布物 tag `v0.4.0`／GitHub Release `v0.4.0`
 > （纪律见 `docs/release-sync.md`；`v0.3.0`→`5f154a5` 不移动）。
 > **SemVer 取 minor**：可求证（L1/L2/L3）与服务形态（`/run` `/trace` `/health`）两个新能力已落地一个版本周期，
 > 本期以安全面与发布治理收口；`MemoryCore` 接口**仍为 v1**（只追加，无契约变更）。评测批次仍冻结（零新花费）。

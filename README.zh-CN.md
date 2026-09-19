@@ -157,7 +157,7 @@ export HIPPOCAMPUS_BASE_URL=https://api.deepseek.com   # 可选，也可写在 c
 ## 验证自己跑一遍
 
 ```bash
-python -m pytest tests/ -q            # 540 条（含模型臂 21 条；C 盘紧张时加 --basetemp=D:/tmp/pt）
+python -m pytest tests/ -q            # 577 条（含模型臂 21 条；C 盘紧张时加 --basetemp=D:/tmp/pt）
 python scripts/check_interface.py     # MemoryCore v1 契约（scope 第一参数／无 HTTP 字段／只追加）
 python scripts/audit_deps.py          # 依赖审计：全局单例残留必须为 0
 python scripts/scan_credentials.py    # 凭据扫描：零命中
@@ -172,7 +172,9 @@ Windows 与 Linux 双平台。
 
 - 记忆库是**单写者**的：同一库目录同时只有一个进程可写，第二个写者排队或被告知
   （僵尸锁可回收，`hippocampus doctor` 可查锁状态）。
-- 出站 URL：由数据或模型提供的地址仅允许 http／https，且拒绝环回／私有／保留地址。
+- 出站 URL：由数据或模型提供的地址**默认仅允许 https**，且拒绝环回／私有／保留地址；明文 `http://`
+  公网出口需显式设 `HIPPOCAMPUS_ALLOW_PLAINTEXT_OUTBOUND=1`（默认关）。本地模型端点属操作员配置，
+  走另一条通道（允许环回 http）。
 - 记忆只增不删：修改走 **supersede**（旧条保留、可追溯），删除走归档。
 
 ## 文档索引

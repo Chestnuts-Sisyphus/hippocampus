@@ -16,6 +16,7 @@
 | ~~服务化没有管理口（E1）~~ | **已解决（七轮 T3，随下一个 tag 发）**：`hippocampus serve` 起管理口，三端点 `/run`（执行一轮注入＋固化，回 `run_id`）／`/trace?run_id=`（取该次注入的全链路审计）／`/health`（索引与库健康）。**默认只绑 127.0.0.1＋实例令牌**；要出网卡必须显式 `--allow-remote`，无令牌则拒起 | 与代理形态同一端口（二择一起动）；**不起上游转发**（不把这一轮话转给模型作答），但固化阶段的记忆抽取按配置使用模型端点（可用即出站、仅 https，配不到走规则档）——真机实测订正见 `docs/deployment.md` §二·五第 3 条。用法见 `docs/deployment.md` §二·五 |
 | E2（"要不要做 MCP 工具接入"）口径 | **已消解，非缺口（七轮 B1 拍板登记）**：GitTok 线 09-17 上线的 llms.txt＋MCP server 是**对外提供**方向；Hippocampus 正本 §一"不做 MCP 工具接入"说的是**消费**方向（不通过 MCP 接第三方工具）。两句方向相反、不冲突，Hippocampus 侧口径维持不变 | 记录用途：防止以后有人拿 GitTok 的 MCP 反过来说本项目"缺服务化" |
 | ~~`GET /health` 免鉴权（管理口探针位）是否收紧~~ | **已解决（八轮 V8）**：绑**非环回**（`--allow-remote`）时 `/health` 同样必须带实例令牌，缺则 401；绑**环回**时维持 0.1.0 以来的免鉴权（本机拨测方便）。`/run`／`/trace` 口径不变（缺令牌 401） | 环回默认＋令牌仍是基线；两态由 `tests/test_n35_r8_health_auth.py` 钉（接线＋行为）。口径见 `docs/deployment.md` §二·五第 2 条 |
+| ~~模型口（代理形态）鉴权半成品~~ | **已解决（九轮 W1）**：`serve()` 补齐与管理口同口径的两道闸——非环回必须显式 `--allow-remote` **且**有实例令牌，否则拒起（退出码 2）；非环回时 `/health` 与 `/v1/models` 也要令牌（`/v1/models` 回**配置的模型名**，属信息面，定性为"环回免鉴权、非环回纳入鉴权"）。环回档行为一字未改 | 两形态鉴权面自此一致；`tests/test_n38_r9_proxy_auth.py` 钉接线＋行为＋CLI 透参。口径见 `docs/deployment.md` §一与 §二·五第 1、2 条。**属默认对外行为变更**（非环回部署会受影响）→ 随 v0.5.0 发版 |
 
 ## 二、记忆层
 
@@ -28,6 +29,7 @@
 | ~~可求证机制（正本 §三-4 新增设计）~~ | **已实现（七轮 T2，随下一个 tag 发）**：`memory/verification.py` 三级判据（L1 存在性·自洽／L2 库内一致性／L3 外站探测**默认关**）＋三态处置（`verified` 直存留证据／`refuted` 按来源分流：用户挂起询问不静默丢、模型丢弃＋观察日志留痕／`unverifiable` 直存且**不打可疑**）；`memories` 追加四列（全带默认值，v1 只追加契约成立）；开关 `verification_enabled`（默认开）／`verification_external`（默认关）；观察轨那条前身幻觉判据已收敛到同一入口；验收锚点 A42–A45 见 `tests/test_n30_r7_verification.py` | 边界不变：**只对内容里可机械校验的结构求证**，不做"事实正确性"承诺、不对偏好求证、不用模型做判据。八轮 V10 补上真机一侧：显式开 `verification_external` 跑通 **verified／refuted／未取证** 三态与缓存命中（默认档实测零出站），并修掉"HTTP 4xx/5xx 被吞成未取证 → 死链判假分支不可达"这个只有真机才会暴露的缺陷；记录见 `docs/verification-design.md` §五·五，**默认仍为关** |
 | ~~模型输出的观察轨没有生产调用点~~ | **已解决（0.2.1）**：`consolidate` 的 `assistant_text` 分支调 `extract_response`（模型输出→`shadow=1`，永不注入），两形态共用；受学习开关约束，离线档零调用 | — |
 | ~~向量索引段偶发读不到（hnsw）~~ | **已解决（0.2.1）**：**根因**＝会话初始化时手工 `DELETE FROM chroma.embeddings_queue`（改内部表，会把还没落段的写入抹掉）＋ 段 reader 建不起来时只重试不修；现改为**只写配置**（`automatically_purge`，回收交给 chroma）＋ 打开会话时**预热探测** ＋ 读失败→**从 memory.db 重建向量池**（实测：重试/再 upsert 都无效，重建有效）＋ `hippocampus index rebuild` 运维入口。复现脚本口径见本文件 §七 | 残余风险：chroma 版本升级可能改变内部行为（我们不碰内部表了，只依赖公开 API） |
+| 模型口固化阶段遇"上游回体不是合法 JSON"→ 裸 500（**九轮 W6 真机冒烟逮到，本轮只登记**） | 现象：把 `hippocampus proxy` 的上游指向一个回纯文本的端点，`POST /v1/chat/completions` 得到 ASGI **500 `Internal Server Error`**（无 `stage`、无已完成段信息）。链路：`proxy/app.py _handle → core.consolidate → pipeline.process_user_message → extract._extract_with_llm → llm.chat_json` 抛 `ValueError`（JSON 解析失败）。`extract` 只在 `LLMUnavailable` 上降级到规则档，`ValueError` 不在其列。管理口在七轮已把同一段兜成 **502＋回带已完成注入段**（`docs/deployment.md` §二·五第 3 条），两形态口径不一致 | **本轮不修**：改的是错误语义（500→502／是否降级规则档），属对外行为变更，需与 W1/W3 一起进一次 minor 发版并补两形态一致回归；复现随 W6 入 CI（`scripts/live_proxy_smoke.py`，把桩上游回体换成纯文本即红）。判据：两形态遇"抽取器拿到非 JSON"必须同一状态码且回带已完成段 |
 
 ## 三、评测
 
@@ -57,6 +59,7 @@
 |---|---|---|
 | ~~无版本标签~~ | **已解决**：`v0.2.0` tag＋Release（见 GitHub Releases） | — |
 | 未发布 PyPI | 安装走 GitHub 直装 / 源码；分发名 `hippocampus-agent` 已在 PyPI 占位可用 | `pip install` 装不到 |
+| ~~出站口径三处不一致（文档说"仅 https"、代码与测试放行公网 http）~~ | **已收口（九轮 W3）**：`validate_outbound_url` 默认**仅 https**（数据/模型提供的 URL），明文公网出口需显式 `HIPPOCAMPUS_ALLOW_PLAINTEXT_OUTBOUND=1`（**默认关**）；本地模型端点走 `validate_endpoint_url`（允许环回 http，行为不变）。`docs/security.md` §②／`docs/deployment.md` §三第 4 条／`src/hippocampus/net.py` 与 `tests/test_a40_a41_safety.py` 四处同一口径，并由 `tests/test_n40_r9_outbound_policy.py` 做"文档↔实现"逐字核对 | **属默认对外行为变更**：抓取记忆里的 `http://` 链接、指明文公网 API 会直接被拒（要显式开闸）→ 随 v0.5.0 发版 |
 | ~~无导入/导出命令~~ | **已解决（0.2.0）**：`hippocampus export <目录>` / `import <目录>`（目录包含 manifest 与 schema 版本；导入默认不覆盖，`--force` 时旧库留 `.bak` 副本） | — |
 | 演示脚本 | `scripts/demo.sh`／`scripts/demo.ps1`（起代理→灌数据→三格式请求→评测→结果表）；**两版均已实测（2026-09-18）**：`demo.ps1` 修了无 BOM 导致 PowerShell 按 ANSI 解析中文串报语法错的问题（已带 UTF-8 BOM），之后五段全通（doctor→seed→代理 8765→三格式请求→20 题评测 开 20/20／关 6/20／基线 18/20）；**跨会话长任务演示（六轮 G7，2026-09-18）**：`scripts/demo_flow.py` 一键走完三形态（记忆核心/Agent/代理）＋跨会话记忆生效断言（会话 A 写入→会话 B/Agent/代理均复述），4 断言全过（exit 0，离线零凭据，输出样例见结果文档 §十一） | 换系统区域设置（非简体中文）时仍需 BOM 保障 |
 | ~~**单条写入随库规模线性变慢**~~ | **已解决（0.3.0，六轮 T6）**：每次 `write` 原触发**全量**索引同步（1154 规模 p50 **749 ms**，那是修复前口径，见 §6.1 标注）；现改为**增量 upsert**（只同步本轮触碰的新记忆／新经历／被取代项），同规模实测 p50 **42.0 ms** | 残余风险：跨账户长跑仍受会话缓存上限约束（`HIPPOCAMPUS_SESSION_CACHE_MAX`）；极端并发写入下增量与全量的收敛差异靠 `index_health`／`index rebuild` 兜底 |

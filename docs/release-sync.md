@@ -18,7 +18,11 @@
    与结果文档逐值核对（**头条分随正本演进**：LongMemEval 现为全量 500 题 **74.2%**，70.5% 是抽 200 的历史行）。
 3. **按需 tag + Release**（英文 notes，含两个官方分与口径三件套）：每个 tag 前本地全量
    `pytest --basetemp=D:/tmp/pt` 全绿；Release notes = 做了什么 / 数字（带 CI+口径） / 安全 seal。
-   **版本号一致是"五处"不是"四处"**：`pyproject.toml` ／ CHANGELOG 段 ／ tag ／ Release ／ **`uv.lock` 里的根包版本**。
+   **版本号一致是"六处"**（九轮 W2 归一，此前一处写"四处"一处写"五处"）：
+   `pyproject.toml` ／ `hippocampus.__version__`（自 W2 起**改读安装元数据**，不再手写）／
+   `importlib.metadata` ／ FastAPI `app.version`（OpenAPI 文档里的版本）／ **`uv.lock` 里的根包版本** ／
+   `CHANGELOG.md` 顶部版本段。机器闸：`tests/test_n39_r9_version_single_source.py`
+   （六处逐一比对＋"改一处必红"对照，不再靠人肉数处数）。
    `uv.lock` 由 `uv run` 自动同步，改完 `pyproject.toml` 后**必须再 `git status` 看一遍**再打 tag，
    否则 tag 内锁文件仍写旧版本（八轮 V7 就漏过一次，补提交后把 tag 移到新提交）。
 4. **description/topics 复核**：仓库名、description、topics 是否与本期成果一致（README 顶部

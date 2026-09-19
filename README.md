@@ -135,8 +135,9 @@ hippocampus chat --offline "记住：我不看外包"  # memory discipline works
 | Proxy | OpenAI-compatible proxy (`/v1/chat/completions`, `/v1/responses`, `/v1/messages`) | `hippocampus proxy` |
 | Agent | LangGraph graph (think / act / answer) | `hippocampus chat` |
 
-Guards are wired at every layer: outbound URLs are validated (no localhost/private/reserved by
-default), credentials come from environment or keyring only (zero literals in source/tests),
+Guards are wired at every layer: outbound URLs are validated (**https-only** by default, no
+localhost/private/reserved; plaintext public egress needs an explicit opt-in),
+credentials come from environment or keyring only (zero literals in source/tests),
 memory writes are safe-ident/safe-DDL checked, and offline mode means *no outbound requests, period*
 — benchmarks default to offline unless `--model-arm` is explicitly passed.
 
@@ -144,7 +145,7 @@ memory writes are safe-ident/safe-DDL checked, and offline mode means *no outbou
 
 ## 🧪 Tests & CI
 
-- **540 pytest tests** (3 xfailed) — memory core, both forms, guards, embedding tiers, public-bench
+- **577 pytest tests** (3 xfailed) — memory core, both forms, guards, embedding tiers, public-bench
   adapters, official judging arm; all offline-runnable (`pytest --basetemp=D:/tmp/pt`).
 - Demo eval runs in CI with **threshold assertions** (memory on ≥9/10, memory off ≤6/10) — score
   regressions turn the pipeline red.
