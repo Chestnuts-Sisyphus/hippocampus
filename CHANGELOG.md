@@ -3,6 +3,23 @@
 本项目遵循 [Semantic Versioning](https://semver.org/lang/zh-CN/)；
 `MemoryCore` 接口自 v1 起**只允许追加字段**（见 `docs/memory-core-v1.md`）。
 
+## [Unreleased] — 八轮（安全面与发布收口，2026-09-19 起）
+
+> 本段随 **v0.4.0** 发布（SemVer minor：两个新能力已落地一个版本周期）。评测批次仍冻结（零新花费）。
+
+治理与暴露面：
+
+- **V3 公开面泄露闸** `scripts/scan_public_leak.py`：扫 tracked 的 `*.md`／`*.yml`／`*.toml`／**`*.py`**，
+  命中"凭据定位线索"形态（登记簿目录与文件名、行号指针、仓外正本目录、本机用户目录与账号名）即退出非零，
+  已进 CI。两条实现口径：命中**只报文件行号与形态名、不回显文本**（CI 日志同为公开面）；
+  规则由片段运行时拼装，故**扫描器自身与它的测试都在扫描范围内、零豁免**。
+  对照测试 `tests/test_n34_public_leak_gate.py`（植入→命中→删掉→零命中；`*.py` 探针单独钉，
+  防的正是本轮第一批脱敏"只扫文档漏了 tests/"那个错）。新约定入 `docs/security.md` §⑦：
+  **仓外正本路径一律环境变量注入，未配置即 skip**，源码/测试/文档不得硬编码本机绝对路径；
+- **V8 健康口在非环回下也鉴权**：`build_app(..., health_requires_auth=True)`，由 `serve_management`
+  在绑到非环回（`--allow-remote`）时置真 → 缺令牌 **401**；绑环回时维持 0.1.0 以来的免鉴权。
+  两态回归 `tests/test_n35_r8_health_auth.py`；口径同步 `docs/deployment.md` §二·五第 2 条与 `docs/roadmap.md` §一。
+
 ## [Unreleased] — 七轮（工程完善轮，2026-09-19 起）
 
 > 本段随**下一个 tag** 发布；`v0.3.0`（→`5f154a5`）不移动。本轮**评测批次冻结**（零新花费）。

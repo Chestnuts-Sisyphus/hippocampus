@@ -24,7 +24,7 @@
 | CLI 命令 | `hippocampus` | `[project.scripts]` 不变 |
 | import 包名 | `hippocampus` | 不变 |
 | 默认端口 | `8765` | 写入 `config.py` 的 `DEFAULT_PORT`，由 `hippocampus doctor` 打印实际值 |
-| **PyPI 分发名** | **`hippocampus-agent`**（栗子指定） | 唯一"被迫不能取裸名"的一处：PyPI 的 `hippocampus` 是别人的包（实测见上表第 5 行）。分发名只在 `pip install` / `pip show` 出现，项目名／仓库／CLI／import 包名都还是 Hippocampus |
+| **PyPI 分发名** | **`hippocampus-agent`**（栗子指定） | 唯一"被迫不能取裸名"的一处：PyPI 的 `hippocampus` 是别人的包（实测见上表 5 号条目）。分发名只在 `pip install` / `pip show` 出现，项目名／仓库／CLI／import 包名都还是 Hippocampus |
 
 > **为什么分发名不能是裸 `hippocampus`**：那是第三方的 sqlite memoization 包。
 > 若把分发名写成 `hippocampus`，读者照 README 敲 `pip install hippocampus` 会装到别人的东西——

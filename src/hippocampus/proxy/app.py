@@ -87,7 +87,15 @@ def _unauthorized_body() -> dict[str, Any]:
     }
 
 
-def build_app(core: MemoryCore, *, confirm_block: bool = True, offline: bool = False, upstream: Any = None, auth_token: str | None = None):
+def build_app(
+    core: MemoryCore,
+    *,
+    confirm_block: bool = True,
+    offline: bool = False,
+    upstream: Any = None,
+    auth_token: str | None = None,
+    health_requires_auth: bool = False,
+):
     """构造 FastAPI 应用。
 
     `upstream(payload, *, model, endpoint, stream, body)` 为转发函数（None=离线档）：
@@ -96,6 +104,9 @@ def build_app(core: MemoryCore, *, confirm_block: bool = True, offline: bool = F
 
     `auth_token`：实例令牌（A2）。None＝从存储读取（`instance_token` 文件）；
     空串＝不鉴权（测试与无令牌环境）；非空＝要求 `Authorization: Bearer <token>`。
+
+    `health_requires_auth`：八轮 V8。`/health` 自 0.1.0 起免鉴权（进程活着＋索引健康），
+    环回档维持原样；服务形态绑到**非环回**时必须置 True——回体里的 stats／索引／锁是实质信息面。
     """
     from fastapi import FastAPI, Request
     from fastapi.responses import JSONResponse, StreamingResponse
@@ -112,7 +123,9 @@ def build_app(core: MemoryCore, *, confirm_block: bool = True, offline: bool = F
     app = FastAPI(title="Hippocampus", version="0.1.0", docs_url=None, redoc_url=None)
 
     @app.get("/health")
-    def health() -> dict[str, Any]:
+    def health(request: Request):
+        if health_requires_auth and not _authorized(request):
+            return JSONResponse(status_code=401, content=_unauthorized_body())
         scope = Scope()
         return {
             "ok": True,
@@ -524,6 +537,8 @@ def serve_management(
     安全默认（与 A2 同口径，写进 docs/deployment.md）：
     - 只绑环回。要绑到非环回地址必须显式 `allow_remote=True`，**且强制要有实例令牌**
       ——没令牌就不起（管理口能写记忆，暴露到局域网裸奔是不可接受的）；
+    - 非环回时 `/health` 同样要令牌（八轮 V8：回体里的计数／索引／锁是实质信息面）。
+      环回档维持 0.1.0 以来的免鉴权，便于本机拨测；
     - 与代理形态同一份应用、同一套鉴权，端口也共用（两形态择一起动，不抢端口）。
     """
     import uvicorn
@@ -538,11 +553,19 @@ def serve_management(
         if not token and not loopback:
             print("拒绝启动：非环回绑定必须有实例令牌，但当前环境拿不到令牌文件。")
             return 2
-        app = build_app(core, confirm_block=True, offline=True, upstream=None, auth_token=token or None)
+        app = build_app(
+            core,
+            confirm_block=True,
+            offline=True,
+            upstream=None,
+            auth_token=token or None,
+            health_requires_auth=not loopback,
+        )
         print(f"Hippocampus 服务形态（管理口）监听 http://{host}:{port}")
         print("  POST /run   执行一轮注入＋固化（body: {\"text\": \"…\"}；scope 走 X-Hippocampus-Account/Session 头）")
         print("  GET  /trace 按 run_id 取那次注入的全链路审计（候选全集＋剔除原因＋观察事件）")
-        print("  GET  /health 索引与库健康（嵌入档／计数／锁／索引）")
+        print("  GET  /health 索引与库健康（嵌入档／计数／锁／索引）"
+              + ("（非环回：同样要令牌）" if not loopback else "（环回免鉴权）"))
         if token:
             print(f"  实例令牌已启用（前 8 位 {token[:8]}…）：请求带 `Authorization: Bearer <完整令牌>`")
         uvicorn.run(app, host=host, port=port, log_level="warning")

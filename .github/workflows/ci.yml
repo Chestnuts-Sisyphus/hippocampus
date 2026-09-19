@@ -58,6 +58,14 @@ jobs:
       - name: 凭据扫描（零命中）
         run: python scripts/scan_credentials.py
 
+      - name: Public-surface leak gate (zero hits)
+        # Round-8 V3: this repo is PUBLIC. The two leaks found late on 09-19 were only
+        # spotted by hand-running git grep, and the first sanitization pass missed
+        # tests/ because it scanned docs only. Hence this gate walks the tracked tree
+        # including *.py and fails on credential-locator shapes (registry paths,
+        # "line N" pointers, out-of-repo source-of-truth dirs, local account paths).
+        run: python scripts/scan_public_leak.py
+
       - name: 形态路径必须真跑（不允许静默跳过）
         # 装了 proxy extra（uvicorn/fastapi/httpx）这三类路径才可能跑：真服务器三格式、
         # 真流式、实例令牌鉴权、带 tools 的三向端到端。先断言能力在，再跑这些文件——
