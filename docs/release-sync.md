@@ -18,6 +18,9 @@
    与结果文档逐值核对（**头条分随正本演进**：LongMemEval 现为全量 500 题 **74.2%**，70.5% 是抽 200 的历史行）。
 3. **按需 tag + Release**（英文 notes，含两个官方分与口径三件套）：每个 tag 前本地全量
    `pytest --basetemp=D:/tmp/pt` 全绿；Release notes = 做了什么 / 数字（带 CI+口径） / 安全 seal。
+   **版本号一致是"五处"不是"四处"**：`pyproject.toml` ／ CHANGELOG 段 ／ tag ／ Release ／ **`uv.lock` 里的根包版本**。
+   `uv.lock` 由 `uv run` 自动同步，改完 `pyproject.toml` 后**必须再 `git status` 看一遍**再打 tag，
+   否则 tag 内锁文件仍写旧版本（八轮 V7 就漏过一次，补提交后把 tag 移到新提交）。
 4. **description/topics 复核**：仓库名、description、topics 是否与本期成果一致（README 顶部
    对齐 GitTok/Infinigrow 包装时一并检查）。
 5. **数字正本可复跑**：结果文档里的每个新数字必须带复跑命令（**数字正本＝仓库外的本地结果文档，
