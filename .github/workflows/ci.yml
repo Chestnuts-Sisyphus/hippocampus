@@ -34,6 +34,11 @@ jobs:
       # Windows runners use a cp1252 console; without this, printing Chinese
       # from inline `python -c` raises UnicodeEncodeError (offline-smoke step).
       PYTHONIOENCODING: "utf-8"
+      # Round-9 W4 (batch-B CI red, root-caused): the gap-ledger guard used to `pytest.skip`
+      # on every CI run. Pointing the env var at the in-repo synthetic fixture makes the guard
+      # really execute. It must live at **job** level: the no-phantom-skip check is a separate
+      # step, and a step-scoped env left that check running blind (it then correctly turned red).
+      HIPPOCAMPUS_GAP_LEDGER: tests/fixtures/gap_ledger_synthetic.md
     steps:
       # Full history: the leak gate below scans git objects (commit messages + tag notes).
       # A shallow checkout would leave it with only HEAD, so the git-object exit would be
@@ -52,13 +57,10 @@ jobs:
           pip install -e ".[dev,vector,proxy]"
 
       - name: 测试（含随迁的记忆层测试）
-        # Round-9 W4: the canonical gap ledger lives outside the repo (a PUBLIC repo must not
-        # carry its path), so this guard used to `pytest.skip` on every CI run = green that
-        # proves nothing. CI now points the env var at an in-repo synthetic fixture with the
-        # same shape, so the guard really executes; drift of the real (local) ledger is still
-        # caught by running the identical assertion locally with HIPPOCAMPUS_GAP_LEDGER set.
-        env:
-          HIPPOCAMPUS_GAP_LEDGER: tests/fixtures/gap_ledger_synthetic.md
+        # Round-9 W4: HIPPOCAMPUS_GAP_LEDGER is set at job level (see `env:` above) so the
+        # gap-ledger guard runs here instead of `pytest.skip`-ing on every CI run; the
+        # no-phantom-skip step below proves it really ran. Real (local-only) ledger drift is
+        # still caught by running the identical assertion locally with the env var pointed there.
         run: python -m pytest tests/ -q
 
       - name: Round-9 W4 no-phantom-skip check (ledger guard must not skip on CI)
@@ -193,8 +195,13 @@ jobs:
           from hippocampus.core import MemoryCore
 
           core = MemoryCore()
-          tier = core.embedding_tier()
-          print("core tier:", tier)
+          info = core.embedding_tier()
+          print("core tier:", info)
+          # embedding_tier() returns a mapping; the degraded tier must be a named string in it
+          # (an earlier version of this step asserted isinstance(tier, str) -- that was the
+          # step's own bug, not the code's).
+          assert isinstance(info, dict), f"embedding_tier() shape changed: {type(info)}"
+          tier = info.get("tier")
           assert isinstance(tier, str) and tier, "embedding_tier() must degrade to a named tier, not crash"
           core.close()
           PY

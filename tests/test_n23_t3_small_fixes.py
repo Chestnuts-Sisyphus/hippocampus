@@ -160,8 +160,11 @@ def test_shadow_registered_as_observation_track_in_naming_docs():
 def test_round2_gap_a30_3_marked_resolved():
     """A16：二轮缺口清单 A30-3 状态清理为已解决（N14）。
 
-    检查对象是仓库外数字正本（仅本机存在）——路径由 `HIPPOCAMPUS_GAP_LEDGER` 给出，
-    未配置或不存在时跳过；CI 上跳过，本机配置后仍会真判（正本状态漂移只有本机能抓）。
+    检查对象是仓库外数字正本（公开仓不能带它的路径）。**九轮 W4 起 CI 不再跳过**：
+    job 级 `HIPPOCAMPUS_GAP_LEDGER` 指向仓内合成夹具（同形状），跑的是同一条断言；
+    正本本身的漂移仍由本机配置该变量后执行同一判据抓（`ci.yml` 的 no-phantom-skip
+    步骤守着"CI 上不许 skip"）。配了变量但路径不存在仍按 skip：那是"指错了地方"，
+    不是正本漂移，不该冒充红。
     """
     import os
     from pathlib import Path

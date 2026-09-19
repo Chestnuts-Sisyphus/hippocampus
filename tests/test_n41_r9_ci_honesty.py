@@ -31,13 +31,19 @@ LEDGER_MARKER = "已解决（N14）"
 
 # ---------------------------------------------------------------- K5
 
-def test_ci_configures_ledger_fixture_for_test_step():
-    """CI 的测试步骤必须注入 `HIPPOCAMPUS_GAP_LEDGER`，指向仓内合成夹具（正本路径不入公开仓）。"""
+def test_ci_configures_ledger_fixture_at_job_level():
+    """`HIPPOCAMPUS_GAP_LEDGER` 必须配在 **job 级** env（指向仓内合成夹具）。
+
+    批次 B/C 的 CI 红点根因就在这：变量原先只挂在"测试"那一步的 step env 上，
+    而"守护真的跑了吗"是**另一步**——它拿不到变量，于是守护又 skip，检查把它判红。
+    所以判据收严为"出现在 `steps:` 之前"＝job 级，所有步骤共用一份环境。
+    """
     ci = CI.read_text(encoding="utf-8")
     assert LEDGER_ENV in ci, "ci.yml 里没有配置正本路径环境变量 → 守护测试会在 CI 上永远 skip"
-    step = ci.split("python -m pytest tests/ -q", 1)[0]
-    assert "tests/fixtures/gap_ledger_synthetic.md" in step, (
-        "测试步骤的 HIPPOCAMPUS_GAP_LEDGER 没指向仓内夹具（或被挪到了别处）"
+    head = ci.split("\n    steps:", 1)[0]
+    assert LEDGER_ENV in head, "HIPPOCAMPUS_GAP_LEDGER 被挪回 step 级：no-phantom-skip 那一步会看不见它"
+    assert "tests/fixtures/gap_ledger_synthetic.md" in head, (
+        "job 级 HIPPOCAMPUS_GAP_LEDGER 没指向仓内夹具（正本路径不入公开仓）"
     )
 
 

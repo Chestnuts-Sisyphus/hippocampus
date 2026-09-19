@@ -87,7 +87,7 @@
   **验收口径订正（公开改判）**：任务书写"schema_version 前后断言可见"——库内**没有**版本号字段
   （`PRAGMA user_version` 全程未使用；补它＝动 accounts schema，撞硬边界），故"前后"用**可见的结构差异**断言，
   真正的版本号在导出包 manifest（`transfer.SCHEMA_VERSION = 1`）。
-- **CI 实测后的两处补记（批次 A 的 CI 红点，逐 job 交账后单独修）**：
+- **CI 实测后的四处补记（批次 A／B／C 的 CI 红点，逐 job 交账后单独修）**：
   ①`test_n18_release.py` 的"CI 不得依赖常驻代理进程"用**全文文本**匹配 `hippocampus proxy`，
   被 W6 那条**英文注释**撞红（本地全绿、CI 五个 job 全红）→ 判据收窄到"只认 `run:` 命令行"，
   并加对照测试：注释里提不算红、真有一条 `run: hippocampus proxy ...` 必须红。
@@ -96,6 +96,14 @@
   这是**把"本地有完整历史"当前提**混进了产品闸。判据改成与历史深度无关的
   "恰好多一条 **且** 命中的来源可指认成植进去的那条"；同时把 `full` job 的 checkout
   改成 `fetch-depth: 0`，让"git 对象"这个出口在 CI 里真的覆盖历史而不只是名义扫一遍。
+  ③（批次 B＋C，四个 `full` job 全红）`HIPPOCAMPUS_GAP_LEDGER` 原先挂在"测试"**那一步**的 step env，
+  而"守护到底跑没跑"是**另一步**（no-phantom-skip）——它拿不到变量，守护照旧 skip，于是**检查本身**
+  按设计把 CI 判红。修法：变量上提到 **job 级 `env:`**（全步骤共用），并把 `test_n41` 的判据收严为
+  "必须出现在 `steps:` 之前"——同类"只给一步配了环境"的回归今后在本机就红，不用等 CI 两小时。
+  ④（批次 B＋C，`core-only` job 红）同一 job 里的"降级档必须有名有姓"步骤断言 `isinstance(tier, str)`，
+  而 `MemoryCore.embedding_tier()` 返回的是 mapping（`model`／`tier`／`needs_download`／`enabled`）——
+  **是这条闸写错了，不是产品缺陷**（本机装了 chromadb 所以看不见）。改为断言返回 dict 且 `tier` 字段
+  是非空字符串。两处红点均**未被后续绿覆盖**，各自在批次 E 交账。
 
 复跑：
 
