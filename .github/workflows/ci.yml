@@ -47,7 +47,28 @@ jobs:
           pip install -e ".[dev,vector,proxy]"
 
       - name: 测试（含随迁的记忆层测试）
+        # Round-9 W4: the canonical gap ledger lives outside the repo (a PUBLIC repo must not
+        # carry its path), so this guard used to `pytest.skip` on every CI run = green that
+        # proves nothing. CI now points the env var at an in-repo synthetic fixture with the
+        # same shape, so the guard really executes; drift of the real (local) ledger is still
+        # caught by running the identical assertion locally with HIPPOCAMPUS_GAP_LEDGER set.
+        env:
+          HIPPOCAMPUS_GAP_LEDGER: tests/fixtures/gap_ledger_synthetic.md
         run: python -m pytest tests/ -q
+
+      - name: Round-9 W4 no-phantom-skip check (ledger guard must not skip on CI)
+        # Fails if the ledger guard is skipped even though CI configured the fixture.
+        run: |
+          python -m pytest tests/test_n23_t3_small_fixes.py -q -rs --basetemp="${{ runner.temp }}/pt-n23" \
+            | tee n23.log
+          python - <<'PY'
+          import sys
+          text = open("n23.log", encoding="utf-8", errors="replace").read()
+          if "SKIPPED" in text or "skipped" in text:
+              print("ledger guard skipped on CI despite HIPPOCAMPUS_GAP_LEDGER being set")
+              sys.exit(1)
+          print("ledger guard really ran on CI (0 skipped)")
+          PY
 
       - name: 接口契约（v1 冻结）
         run: python scripts/check_interface.py
@@ -58,13 +79,17 @@ jobs:
       - name: 凭据扫描（零命中）
         run: python scripts/scan_credentials.py
 
-      - name: Public-surface leak gate (zero hits)
+      - name: Public-surface leak gate (zero hits, incl. git objects + releases)
         # Round-8 V3: this repo is PUBLIC. The two leaks found late on 09-19 were only
         # spotted by hand-running git grep, and the first sanitization pass missed
         # tests/ because it scanned docs only. Hence this gate walks the tracked tree
         # including *.py and fails on credential-locator shapes (registry paths,
         # "line N" pointers, out-of-repo source-of-truth dirs, local account paths).
-        run: python scripts/scan_public_leak.py
+        # Round-9 W5: the working tree is only one of three egress points. --git-text adds
+        # commit messages, tag annotations and release bodies; history is not rewritten
+        # (round-8 V2 decision), so pre-existing hits are tracked as a baseline count that
+        # may only shrink -- one new clue in a commit message turns this step red.
+        run: python scripts/scan_public_leak.py --git-text
 
       - name: 形态路径必须真跑（不允许静默跳过）
         # 装了 proxy extra（uvicorn/fastapi/httpx）这三类路径才可能跑：真服务器三格式、
@@ -81,6 +106,16 @@ jobs:
         # isolated home, server output goes to a file (never an unread PIPE), process is
         # always killed. Asserts 200/401/400/404/502. Zero egress, zero credentials.
         run: python scripts/live_management_smoke.py
+
+      - name: Round-9 W6 live model-port smoke (proxy form, three inbound formats + auth + refusal)
+        # Round-8 V5 proved the management port end-to-end in a real process; the proxy form
+        # only had in-process coverage, so W1's auth wiring could regress on the real CLI
+        # unnoticed. This spawns `hippocampus proxy` on a random free port against a
+        # loopback stub upstream (zero egress), asserts chat/responses/messages 200,
+        # /health + /v1/models 200 on loopback, 401 without the token, and that
+        # --host 0.0.0.0 without --allow-remote refuses to start (rc 2, port left free),
+        # then fails on any leftover process (psutil).
+        run: python scripts/live_proxy_smoke.py
 
       - name: Round-7 live tools dry-run gate (--selfcheck)
         # These two were manual-only artifacts. V5 downgrades them to CI-resident dry runs:
@@ -139,6 +174,45 @@ jobs:
           hippocampus --account core demo --questions 10 --memories
           hippocampus --account core memory list --limit 5
           hippocampus --account core memory pending
+
+      - name: Round-9 W4 degradation tier is real (chromadb must be absent, not silently present)
+        # Without this assertion the job could quietly install the vector extra and "prove"
+        # the core tier on a full stack. Assert absence, then assert the code path reports
+        # a degraded tier instead of raising.
+        run: |
+          python - <<'PY'
+          import importlib.util
+          import sys
+
+          assert importlib.util.find_spec("chromadb") is None, "chromadb is installed -- core tier not isolated"
+          from hippocampus.core import MemoryCore
+
+          core = MemoryCore()
+          tier = core.embedding_tier()
+          print("core tier:", tier)
+          assert isinstance(tier, str) and tier, "embedding_tier() must degrade to a named tier, not crash"
+          core.close()
+          PY
+
+      - name: Round-9 W4 minimal pytest subset on core-only deps
+        # Core-contract files that must hold without the vector/proxy extras (fastapi-backed
+        # version gate lives in the full job; listing it here would ImportError on core-only).
+        # A subset that silently collects zero tests would also be green, hence a count floor.
+        run: |
+          python -m pytest tests/test_a9_memory_crud.py tests/test_memory_core_v1.py \
+            tests/test_a40_a41_safety.py tests/test_n40_r9_outbound_policy.py -q \
+            --basetemp="${{ runner.temp }}/pt-core" | tee core_pytest.log
+          python - <<'PY'
+          import re
+          import sys
+
+          text = open("core_pytest.log", encoding="utf-8", errors="replace").read()
+          nums = [int(n) for n in re.findall(r"(\d+) passed", text)]
+          if not nums or nums[0] < 30:
+              print(f"core-only subset too small (passed={nums}); the subset is not really running")
+              sys.exit(1)
+          print(f"core-only subset ran {nums[0]} tests")
+          PY
 
   lint:
     runs-on: ubuntu-latest

@@ -35,6 +35,11 @@ SCAN_SUFFIXES = {
     ".json", ".txt", ".example", ".sh", ".ps1", ".env",
 }
 # git ls-files 不可用时的兜底遍历：跳过这些目录
+# 九轮 W5：git 对象（提交信息／标签注解／Release 正文）里的**历史既有命中条数**。
+# 公开仓历史不改写（八轮 V2 已裁定），所以这里不要求归零，只要求"只减不增"：
+# 实测出处为 `git:commit:2419926`（八轮 V7 补记那条 message 里的目录名与行号指针各 1 条）。
+# 新写一条线索就会顶过基线 → 闸红。
+GIT_TEXT_BASELINE = 2
 SKIP_DIRS = {".venv", "__pycache__", ".git", ".pytest_cache", ".ruff_cache", "build", "dist", ".mypy_cache", "node_modules"}
 
 
@@ -125,14 +130,122 @@ def scan_files(paths: list[Path]) -> list[dict]:
     return findings
 
 
-def main() -> int:
+def scan_findings(findings: list[dict], *, stage: str) -> int:
+    """打印命中（只报出处与形态名，不回显文本）并给出退出码。"""
+    if not findings:
+        return 0
+    for row in findings:
+        print(f"  ✗ [{stage}] {row['file']}:{row['line']} 命中「{row['rule']}」（命中文本不回显）")
+    return 1
+
+
+def scan_lines(lines: list[tuple[str, int, str]]) -> list[dict]:
+    findings: list[dict] = []
+    for source, idx, line in lines:
+        for pattern, label in LEAK_RULES:
+            if pattern.search(line):
+                findings.append({"file": source, "line": idx, "rule": label})
+    return findings
+
+
+def _git_text_lines(root: Path) -> list[tuple[str, int, str]]:
+    """公开面第二出口：提交信息（`git log %B`）＋ 标签注解（`git tag -n`）。
+
+    工作树干净不代表这两个出口干净——commit message 与 tag 注解一旦推上 GitHub 就是公开内容，
+    且清理只能改写历史（属不可逆例外）。所以这里的纪律是**基线只减不增**。
+    """
+    lines: list[tuple[str, int, str]] = []
+    log = subprocess.run(
+        ["git", "log", "--format=%H%x00%B%x00", "--no-merges"],
+        cwd=root, capture_output=True, encoding="utf-8", errors="replace", timeout=120, check=True,
+    ).stdout
+    for rec in [r for r in log.split("\0\0") if r.strip()]:
+        parts = rec.split("\0", 1)
+        if len(parts) != 2:
+            continue
+        sha, body = parts
+        for idx, line in enumerate(body.splitlines(), start=1):
+            lines.append((f"git:commit:{sha[:8]}", idx, line))
+    tag = subprocess.run(
+        ["git", "tag", "-n", "99"],
+        cwd=root, capture_output=True, encoding="utf-8", errors="replace", timeout=60, check=True,
+    ).stdout
+    for idx, line in enumerate(tag.splitlines(), start=1):
+        lines.append(("git:tag-annotations", idx, line))
+    return lines
+
+
+def _release_text_lines(root: Path) -> list[tuple[str, int, str]]:
+    """公开面第三出口：GitHub Release 正文（`gh release view`）。gh 不可用/未登录时如实报跳过。"""
+    import os
+    import shutil
+
+    if shutil.which("gh") is None:
+        print("  · Release 正文：本机无 gh，跳过（CI 步骤同理，工作树＋git 对象两闸仍必跑）")
+        return []
+    lines: list[tuple[str, int, str]] = []
+    try:
+        listing = subprocess.run(
+            ["gh", "release", "list", "--limit", "30"],
+            cwd=root, capture_output=True, encoding="utf-8", errors="replace", timeout=120,
+            env={**os.environ, "GH_PROMPT_DISABLED": "1", "NO_COLOR": "1"},
+        )
+    except (OSError, subprocess.SubprocessError):
+        print("  · Release 正文：gh 调用异常，跳过")
+        return []
+    if listing.returncode != 0:
+        print("  · Release 正文：gh 未就绪（无网络或未登录），跳过")
+        return []
+    for row in listing.stdout.splitlines():
+        name = row.split("\t")[0].strip()
+        if not name:
+            continue
+        body = subprocess.run(
+            ["gh", "release", "view", name, "--json", "body", "--jq", ".body"],
+            cwd=root, capture_output=True, encoding="utf-8", errors="replace", timeout=120,
+        )
+        if body.returncode != 0:
+            continue
+        for idx, line in enumerate(body.stdout.splitlines(), start=1):
+            lines.append((f"gh:release:{name}", idx, line))
+    return lines
+
+
+def main(argv: list[str] | None = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(description="公开面泄露闸（工作树 tracked 文本 ＋ 可选 git 对象/Release）")
+    parser.add_argument(
+        "--git-text",
+        action="store_true",
+        help="额外扫提交信息／标签注解／Release 正文（历史既有命中按基线记账，只减不增）",
+    )
+    args = parser.parse_args(argv)
+
     files = iter_tracked_files()
     py_files = [p for p in files if p.suffix.lower() == ".py"]
     findings = scan_files(files)
     print(f"公开面泄露闸：扫描 tracked 文本 {len(files)} 个（其中 *.py {len(py_files)} 个）")
-    if findings:
-        for row in findings:
-            print(f"  ✗ {row['file']}:{row['line']} 命中「{row['rule']}」（命中文本不回显）")
+    rc = scan_findings(findings, stage="工作树")
+
+    if args.git_text:
+        git_lines = _git_text_lines(ROOT) + _release_text_lines(ROOT)
+        git_findings = scan_lines(git_lines)
+        print(f"公开面泄露闸（第二／第三出口）：git 文本行 {len(git_lines)} 条，命中 {len(git_findings)} 条"
+              f"（基线 {GIT_TEXT_BASELINE}，只减不增）")
+        if len(git_findings) > GIT_TEXT_BASELINE:
+            for row in git_findings[:GIT_TEXT_BASELINE + 10]:
+                print(f"  ✗ [git] {row['file']}:{row['line']} 命中「{row['rule']}」（命中文本不回显）")
+            print(
+                f"\ngit 对象/Release 命中数 {len(git_findings)} 超过基线 {GIT_TEXT_BASELINE} —— "
+                "新写进去的线索必须删掉（历史既有部分不改写，见 docs/security.md §⑦）"
+            )
+            return 1
+        if git_findings:
+            print(f"  · 历史既有命中 {len(git_findings)} 条 ≤ 基线（公开仓历史不改写，只保证不新增）")
+        else:
+            print("  ✓ git 对象与 Release 正文：零命中")
+    if rc:
         print("\n公开面扫描：有命中（必须脱敏或改由环境变量注入正本路径）")
         return 1
     print("✓ 公开面扫描：零命中（无凭据定位线索、无仓外正本路径、无本机账号痕迹）")
