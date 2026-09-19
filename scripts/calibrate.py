@@ -49,6 +49,37 @@ NEGATIVE: list[str] = [
     "推荐一部电影",
 ]
 
+# ----------------------------------------------------------------------
+# 英文合成标定集（八轮 V6）：与中文集**主题一一对应**，量法完全相同，
+# 这样英文档与中文档的分数分布才可比。为什么单独一套：`UNCALIBRATED_TIERS`
+# 那条缺口的成因就是"标定集是中文合成样本，用它量英文档没有意义"。
+# ----------------------------------------------------------------------
+EN_MEMORIES: list[str] = [
+    "Proofread the resume before submitting it anywhere",
+    "I do not apply to jobs that require long-term business travel",
+    "My preferred city to work in is Hangzhou",
+    "My target role direction is backend engineering and infrastructure",
+    "Wednesday evening is reserved for project development",
+    "I only look at positions that allow remote work",
+]
+
+EN_POSITIVE: dict[str, list[str]] = {
+    "What must I do before I submit a resume": ["Proofread the resume"],
+    "Can I take a job with a lot of travel": ["long-term business travel"],
+    "Which city do I want to work in": ["preferred city to work in is Hangzhou"],
+    "What engineering direction am I aiming at": ["backend engineering and infrastructure"],
+    "What is my Wednesday evening kept for": ["reserved for project development"],
+    "Is a remote-friendly position acceptable": ["allow remote work"],
+}
+
+EN_NEGATIVE: list[str] = [
+    "What did I have for lunch today",
+    "Write me a poem about autumn",
+    "Will it rain tomorrow",
+    "What is twelve plus five",
+    "Recommend me a movie",
+]
+
 
 
 # force-utf8 shim：Windows 控制台默认代码页（CI 里是 cp1252）无法编码 ✓ 等字符，会让"打印"把命令打挂。
@@ -72,8 +103,17 @@ def _top_score(core: MemoryCore, account: str, query: str) -> tuple[float, list[
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--model", default="", help="覆盖嵌入档（如 onnx:bge-small-zh-v1.5）")
+    ap.add_argument(
+        "--lang",
+        choices=("zh", "en"),
+        default="zh",
+        help="标定集语言（八轮 V6）：英文档必须用英文合成集量，中文集量英文档没有意义",
+    )
     ap.add_argument("--json", help="把结果写到该路径")
     args = ap.parse_args()
+
+    positives = EN_POSITIVE if args.lang == "en" else POSITIVE
+    negatives = EN_NEGATIVE if args.lang == "en" else NEGATIVE
 
     if args.model:
         import os
@@ -86,20 +126,25 @@ def main() -> int:
     home = Path(tempfile.mkdtemp(prefix="hippo_calib_"))
     core = MemoryCore(home=home)
     seed_scope = Scope(account=ACCOUNT, session="seed")
-    seed(core, seed_scope)
+    if args.lang == "en":
+        # 英文集不走 seed()（那是中文合成清单）：逐条写进**同一账户**，其余量法完全一致
+        for i, content in enumerate(EN_MEMORIES):
+            core.write(Scope(account=ACCOUNT, session=f"seed-en-{i}"), content, kind="preference")
+    else:
+        seed(core, seed_scope)
 
     pos_scores: list[float] = []
     neg_scores: list[float] = []
     pos_rows: list[dict] = []
     neg_rows: list[dict] = []
 
-    for query, expect in POSITIVE.items():
+    for query, expect in positives.items():
         score, contents = _top_score(core, ACCOUNT, query)
         hit = any(any(e in c for c in contents) for e in expect)
         pos_scores.append(score)
         pos_rows.append({"query": query, "top": round(score, 4), "hit": hit, "expect": expect})
 
-    for query in NEGATIVE:
+    for query in negatives:
         score, _ = _top_score(core, ACCOUNT, query)
         neg_scores.append(score)
         neg_rows.append({"query": query, "top": round(score, 4)})
@@ -115,6 +160,8 @@ def main() -> int:
 
     report = {
         "model": model,
+        "lang": args.lang,
+        "set_sizes": {"positive": len(positives), "negative": len(negatives)},
         "positive": {
             "n": len(pos_scores),
             "min": round(pos_min, 4),

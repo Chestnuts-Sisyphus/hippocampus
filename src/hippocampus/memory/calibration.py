@@ -63,17 +63,32 @@ TIER_PARAMS: dict[str, dict[str, Any]] = {
         "semantic_dup_threshold": 0.85,
         "answer_floor": 0.35,
     },
+    # 英文推荐档（八轮 V6 标定）：`scripts/calibrate.py --lang en --model onnx:Xenova/bge-small-en-v1.5`
+    # 2026-09-19 本机实测（英文合成标定集，与中文集主题一一对应；模型走镜像下载＋sha256 校验，零 API 花费）：
+    #   正样本 0.728–0.8371（中位 0.7651，6/6 命中）／负样本 0.4452–0.5705（中位 0.552）
+    #   → **两分布可分**，answer_floor 取中点 0.649（优先保精确率）。
+    # absolute_floor 0.50 在正样本最小值 0.728 之下（召回优先，与中文神经档同一取法）；
+    # cliff／restate／semantic_dup 本轮**未量出**，沿用中文神经档值——是沿用，不是实测，别当标定结论用。
+    "onnx:Xenova/bge-small-en-v1.5": {
+        "absolute_floor": 0.50,
+        "cliff_gap_min": 0.08,
+        "cliff_ratio": 0.30,
+        "restate_threshold": 0.58,
+        "semantic_dup_threshold": 0.85,
+        "answer_floor": 0.649,
+    },
 }
 
 DEFAULT_TIER = "builtin-hash"
 
 # **已声明的标定缺口**：文档承诺支持、但本仓库标定表没有该档数值的档。
 # 落进这里的档会用内置档参数（词法量纲，证据线偏松），并由 `apply_tier_params`
-# 打一条 stderr 告警——不静默。为什么没有数值：`scripts/calibrate.py` 的标定集是
-# **中文**合成样本，用它量英文档没有意义；英文档的真实结论在 `docs/benchmark.md`
-# （LoCoMo 证据命中 36.7%→45.7%，检索口径、非本表标定产物）。
-# 要消解这条缺口：给一个英文合成标定集，重标定后把键移进 `TIER_PARAMS`。
-UNCALIBRATED_TIERS: frozenset[str] = frozenset({"onnx:Xenova/bge-small-en-v1.5"})
+# 打一条 stderr 告警——不静默。
+# 八轮 V6 起此表**为空**：原先唯一的缺口 `onnx:Xenova/bge-small-en-v1.5` 已用英文合成标定集
+# 量出数值并移进 `TIER_PARAMS`（当时的成因写在 `scripts/calibrate.py`：标定集是中文样本，
+# 用它量英文档没有意义 → 消解方式就是补一套主题一一对应的英文集）。
+# 机制**保留不删**：以后再有"文档承诺但未标定"的档，登记进来即可复用同一条不静默告警。
+UNCALIBRATED_TIERS: frozenset[str] = frozenset()
 
 
 def params_for_tier(model: str) -> dict[str, Any]:

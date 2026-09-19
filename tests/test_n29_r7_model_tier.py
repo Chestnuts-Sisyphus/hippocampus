@@ -69,19 +69,36 @@ def test_documented_tier_table_matches_code():
         )
 
 
-def test_uncalibrated_tiers_warn_on_apply(tmp_path, capsys):
-    """落进未标定缺口的档，换档时**必须出声**（前身缺陷就是静默换量纲）。"""
+def test_english_tier_gap_is_actually_closed():
+    """八轮 V6：原先登记的英文档缺口必须真的量出来并进了表（不是把登记删掉了事）。"""
+    tier = "onnx:Xenova/bge-small-en-v1.5"
+    assert calibration.has_tier(tier), "英文档没进 TIER_PARAMS，等于缺口没消解"
+    assert tier not in calibration.UNCALIBRATED_TIERS
+    params = calibration.TIER_PARAMS[tier]
+    # 0.649 = 2026-09-19 `scripts/calibrate.py --lang en` 实测中点
+    # （正样本 0.728–0.8371／负样本 0.4452–0.5705，两分布可分）
+    assert params["answer_floor"] == 0.649
+    assert params["absolute_floor"] < params["answer_floor"], "召回地板必须低于证据线"
+
+
+def test_uncalibrated_registry_still_warns_on_apply(tmp_path, capsys, monkeypatch):
+    """未标定档**必须出声**（前身缺陷是静默换量纲）。
+
+    表清空后这条不能再靠"集合里有内容"成立（那就是空转假绿），
+    所以临时登记一个假档，验证登记→告警这条机制本身还在。
+    """
     from hippocampus.memory import database as db
 
-    for tier in sorted(calibration.UNCALIBRATED_TIERS):
-        conn = db.connect(tmp_path / f"warn-{tier.replace(':', '_').replace('/', '_')}.db")
-        try:
-            params = calibration.apply_tier_params(conn, tier, force=True)
-        finally:
-            conn.close()
-        assert params.get("embedding_tier") == tier
-        err = capsys.readouterr().err
-        assert "无标定值" in err, f"未标定档 {tier} 没有告警"
+    fake = "onnx:Xenova/newly-documented-tier"
+    monkeypatch.setattr(calibration, "UNCALIBRATED_TIERS", frozenset({fake}))
+    conn = db.connect(tmp_path / "warn-uncalibrated.db")
+    try:
+        params = calibration.apply_tier_params(conn, fake, force=True)
+    finally:
+        conn.close()
+    assert params.get("embedding_tier") == fake
+    err = capsys.readouterr().err
+    assert "无标定值" in err and "未标定缺口" in err, "登记为缺口的档没有走缺口的告警文案"
 
 
 def test_unknown_tier_warns_and_falls_back(tmp_path, capsys):

@@ -13,7 +13,7 @@ sim 0.7578），标定报告结论是"三视角无可行单阈值"。所以本�
 |---|---|---|---|---|
 | **内置档**（默认） | `builtin-hash` | 无（纯 Python 标准库） | **零下载** | 确定性、离线可跑；词法级表征 |
 | **中文推荐档**（可选） | `onnx:Xenova/bge-small-zh-v1.5` | onnxruntime / tokenizers | 首次需模型文件 | 中文语义更好。**仓库名必须带 `Xenova/` 组织前缀**：裸名 `onnx:bge-small-zh-v1.5` 不是合法的 HF 仓库路径（官方与镜像端点均 401），会**静默回退** `onnx_mini_lm_l6_v2`（2026-09-19 实测，见下文「裸名陷阱」） |
-| **英文推荐档**（可选） | `onnx:Xenova/bge-small-en-v1.5` | 同上 | 首次需模型文件（126 MB） | 英文语料：公开基准实测 +9.0 pp（见下）。**档位数值未标定**（已登记 `calibration.UNCALIBRATED_TIERS`）：换该档时参数按内置档回落并打 stderr 告警，英文侧结论来自 `docs/benchmark.md` 的检索口径实测，不是本表标定产物 |
+| **英文推荐档**（可选） | `onnx:Xenova/bge-small-en-v1.5` | 同上 | 首次需模型文件（126 MB） | 英文语料：公开基准实测 +9.0 pp（见下）。**档位数值已标定（八轮 V6）**：`scripts/calibrate.py --lang en` 2026-09-19 实测正样本 0.728–0.8371（6/6 命中）／负样本 0.4452–0.5705，两分布可分 → `answer_floor` 取中点 **0.649**（数值在 `memory/calibration.py` 的 `TIER_PARAMS`，cliff／restate／semantic_dup 本轮未量、沿用中文神经档值并已在表内注明）。注意两条口径别混用：本表是**合成标定集**的量纲，英文侧的真实效果结论仍以 `docs/benchmark.md` 的检索口径实测为准 |
 | 回退档（不推荐） | `onnx_mini_lm_l6_v2` | chromadb 内置 | 首次需下载 | 仅兼容用；中文虚高已知 |
 
 > **选档看语料语言，且必须实测**：英文档在 LoCoMo 全量 1986 题上把证据命中率从

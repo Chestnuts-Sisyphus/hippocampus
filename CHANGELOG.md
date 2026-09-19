@@ -20,6 +20,41 @@
   在绑到非环回（`--allow-remote`）时置真 → 缺令牌 **401**；绑环回时维持 0.1.0 以来的免鉴权。
   两态回归 `tests/test_n35_r8_health_auth.py`；口径同步 `docs/deployment.md` §二·五第 2 条与 `docs/roadmap.md` §一。
 
+防复发与覆盖：
+
+- **V4 数字同源闸** `tests/test_n36_r8_number_hygiene.py`：四份带官方判分口径的文档
+  （README 双语／`docs/benchmark.md`／`benchmark.en.md`）里每个指标位置解析出的分值必须落在合法集合内
+  （当前值与历史值并允许，冒出第三个口径外的数＝红）；中英两版**结果表行集**逐行比对（防"只改一版"）；
+  README 声明的 xfailed 数 == 实打的 `@pytest.mark.xfail` 装饰器数。第一轮实跑就把三处口径不清
+  （发布门槛 `≥50%`／`≥15%` 被当实测分、检索率被当官方分、装配与写入延迟混为一谈）逼出来并逐条收紧，
+  另加一条"植入矛盾必被拦"的对照测试防闸被改松后静默假绿；
+- **V5 真机冒烟进 CI 常驻**：新增 `scripts/live_management_smoke.py` —— 真起 `hippocampus serve` **子进程**
+  （随机空闲端口、隔离 home、输出落文件不接 PIPE、收尾必杀），断言 200／401／400／404／502 五类语义，
+  零出站零凭据（502 那台用必然被出站 URL 校验拒绝的环回端点触发）。CI 新增两步；
+  `live_supersede_probe.py` 与 `bench_cat_attrib.py` 各加 `--selfcheck` 干跑档一并进 CI
+  （前者 1 对变更句＋临时 fresh home，后者仓内 fixture＋合成分，不动任何判据与分数）；
+- **V9 `/trace` 与 `/health` 返回字段文档化**：`docs/deployment.md` §二·五 新增"返回字段"小节，
+  字段以**真机响应**与 `MemoryCore.trace_run()` 实现为准（含一条容易被直觉误解的实现事实：
+  `observe[]` 会把该账户所有 verification／confirmation 事件一并带出，不只本轮）；
+  并由 `tests/test_n37_r8_live_smoke.py` 把文档表格第一列与真响应字段集合**双向比对**——
+  实现加字段而文档没补、或文档写了实现没有的字段，都会红；
+- **V13 测试时间预算台账** `docs/ci-time-budgets.md`：`grep` 全量清点 `tests/`＋`scripts/` 的等待点并逐条分类
+  （功能性预算＝禁止／死锁兜底＝保留但必须注释／请求超时＝保留）。本轮清掉残留的两处秒级功能预算
+  （`entered.wait(3)`、teardown `join(5)`）并把四个 `_Server` 的 20 秒起服务预算提到 300 秒纯兜底；
+  **没有**引入 retry 或 flaky 插件，也没有为绿删断言。
+
+标定（V6，英文档缺口消解）：
+
+- `scripts/calibrate.py` 加 `--lang zh|en`：英文档用**主题一一对应的英文合成标定集**（原缺口的成因就是"标定集只有中文，量英文档没意义"）；
+  2026-09-19 本机实测 `onnx:Xenova/bge-small-en-v1.5`：正样本 0.728–0.8371（6/6 命中，中位 0.7651）／
+  负样本 0.4452–0.5705（中位 0.552）→ **两分布可分**，`answer_floor` 取中点 **0.649**；
+  模型经镜像下载＋sha256 校验，**零 API 花费、零评测批次**；
+- 档位表补该键（`cliff`／`restate`／`semantic_dup` 本轮**未量**，沿用中文神经档值并在代码注释与
+  `docs/embedding.md` 里明写"是沿用不是实测"），`UNCALIBRATED_TIERS` 清空但**机制保留**；
+  原先"遍历该集合断言告警"的守护测试因此会空转 → 改成 `monkeypatch` 临时登记假档，
+  继续钉住"登记为缺口就必须出声"这条机制（`tests/test_n29_r7_model_tier.py`）；
+- **不为提分调参**：0.649 由正负样本中点规则算出，与既有档位同一取法；未改任何判据、未动检索效果结论。
+
 ## [Unreleased] — 七轮（工程完善轮，2026-09-19 起）
 
 > 本段随**下一个 tag** 发布；`v0.3.0`（→`5f154a5`）不移动。本轮**评测批次冻结**（零新花费）。
