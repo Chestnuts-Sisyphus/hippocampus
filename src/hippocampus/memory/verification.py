@@ -172,7 +172,7 @@ def _probe_once(url: str, method: str, timeout_s: float) -> int | None:
 
     req = urllib.request.Request(url, method=method, headers={"User-Agent": "hippocampus-verify/1.0"})
     try:
-        with urllib.request.urlopen(req, timeout=timeout_s) as resp:  # noqa: S310（URL 已过 validate_outbound_url）
+        with urllib.request.urlopen(req, timeout=timeout_s) as resp:  # URL 已过 validate_outbound_url
             return int(resp.status)
     except urllib.error.HTTPError as e:
         return int(e.code)

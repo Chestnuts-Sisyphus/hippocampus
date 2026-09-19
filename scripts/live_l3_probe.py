@@ -49,7 +49,7 @@ def run_probe() -> dict:
     from hippocampus.memory import verification as vf
 
     probes: list[str] = []
-    real_probe = vf._probe_url  # noqa: SLF001（本脚本就是来验这条私有实现的真实行为）
+    real_probe = vf._probe_url  # 本脚本就是来验这条私有实现的真实行为
 
     def counting_probe(url: str, timeout_s: float = 5.0):
         probes.append(url)

@@ -20,9 +20,33 @@
 | `tests/test_n25_t5_session_lru.py` 持有线程进入锁 | `entered` 事件 | 3 秒（功能性） | 300 秒纯死锁兜底＋注释；`release.wait()` 无超时（主线程 finally 必置位） |
 | `tests/test_n25_t5_session_lru.py` teardown 等线程退出 | 线程结束 | 5 秒 | 300 秒死锁兜底＋注释 |
 | `tests/test_n15_proxy_tools.py`／`tests/test_proxy_formats.py`／`tests/test_t6_real_server.py`／`tests/test_n31_r7_serve.py` 的 `_Server.__enter__` | uvicorn 真起（轮询 `server.started`） | 20 秒 | 300 秒死锁兜底＋注释（慢 runner 上开 chroma 集合可远超 20 秒） |
-| 上述四个文件的 `_Server.__exit__` | 服务线程收尾 | 10 秒 | 30 秒死锁兜底＋注释（实测 `should_exit` 后 <1 秒退出；真卡住宁可留下线程也不让 teardown 变假红源） |
+| 上述四个文件的 `_Server.__exit__` | 服务线程收尾 | 10 秒 → 30 秒 | 300 秒死锁兜底＋**超时后断言线程已退出**（原判"30 秒纯属兜底"是错的，见下方二次定性） |
 | `scripts/live_management_smoke.py` 起 CLI 子进程 | `/health` 开始应答（轮询） | 120 秒 | 300 秒死锁兜底（常量 `STARTUP_DEADLINE_S`，注释已标） |
 | `tests/test_n28_r6_engineering.py` 两处等待 | 进锁／teardown | 30 秒／300 秒 | 已是兜底量级，本轮只登记不动码（30 秒远大于"进锁"最坏耗时） |
+
+### 二次定性：`062c3cf` 批 windows-3.11 红点（exit 139 原生崩溃）
+
+首版台账把 `_Server.__exit__` 的 30 秒判成"纯死锁兜底"，**这个判断错了**，同一批 CI 就打了脸：
+`full (windows-latest, 3.11)` 单 job 崩在 `Windows fatal exception: access violation`，退出码 139。
+崩溃栈两条凑在一起说明得很清楚——
+
+- 服务线程（崩的一方）：`proxy/app.py chat_completions → _handle → core.consolidate → _run_turn_guards → missed_extract.scan_and_fix`
+- 主线程（同期在跑）：`tests/conftest.py 的 core 夹具 teardown → MemoryCore.close → memory_bridge.close → chroma 客户端 close`
+
+链条：慢 runner 上一条 in-flight 请求（走完整 consolidate）能跑超 30 秒 → `join(timeout=30)` **超时静默返回** →
+测试体结束、`core` 夹具把 chroma 客户端关掉 → 服务线程还在用已释放的原生对象 → use-after-close 崩进程。
+所以 30 秒是**功能性预算**（"预计 30 秒内收得尾"），正是本表第一类禁止存在的写法；产品逻辑仍然没错，
+错在收尾等待用了个会静默放手的阈值。
+
+处置（四个真服务测试同改）：阈值提到 300 秒量级，并且 join 后 `assert not self.thread.is_alive()`——
+真卡住时判成一条可读的红测试，而不是让 teardown 去撞原生崩溃。**不加 retry、不删断言、不给线程"没退也继续"**。
+
+```bash
+cd /d/AI/Hippocampus
+grep -n "thread.join\|is_alive" tests/test_t6_real_server.py tests/test_proxy_formats.py \
+  tests/test_n15_proxy_tools.py tests/test_n31_r7_serve.py
+gh run view 35425865217 -R Chestnuts-Sisyphus/hippocampus --log-failed   # 本节的原始栈出处
+```
 
 ## 二、保留原值（分类登记，不是漏看）
 

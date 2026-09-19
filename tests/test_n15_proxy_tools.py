@@ -54,9 +54,11 @@ class _Server:
 
     def __exit__(self, *exc: object) -> None:
         self.server.should_exit = True
-        # 收尾等线程退出：值取 30 秒纯属死锁兜底（实测 should_exit 后 <1 秒退出）；
-        # 真卡住时宁可留下一个线程，也不让 teardown 变成新的假红来源。
-        self.thread.join(timeout=30)
+        # 死锁兜底（V13）：30 秒是功能性假设而非兜底，慢 runner 上 in-flight 请求（consolidate 全链路）能跑超它。
+        # 真等靠 join 本身；超时后必须判红——带着还在跑请求的线程往下走，core 夹具会先关 chroma 客户端，
+        # 服务线程就在 scan_and_fix 里访问已释放对象，CI windows job 表现为 access violation / exit 139。
+        self.thread.join(timeout=300)
+        assert not self.thread.is_alive(), "服务线程未退出，继续会让夹具 teardown 撞原生崩溃"
 
 
 def _capturing_upstream(captured: dict):
