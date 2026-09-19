@@ -35,7 +35,12 @@ jobs:
       # from inline `python -c` raises UnicodeEncodeError (offline-smoke step).
       PYTHONIOENCODING: "utf-8"
     steps:
+      # Full history: the leak gate below scans git objects (commit messages + tag notes).
+      # A shallow checkout would leave it with only HEAD, so the git-object exit would be
+      # scanned in name only. Cost is one extra fetch on a small repo.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - uses: actions/setup-python@v5
         with:

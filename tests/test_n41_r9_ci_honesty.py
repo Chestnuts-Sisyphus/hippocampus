@@ -133,16 +133,26 @@ def test_git_text_mode_exists_and_is_baseline_bounded():
     )
 
 
-def test_planted_commit_style_clue_exceeds_the_baseline():
-    """对照测试：往"提交信息"里植一条定位线索 → 计数必须顶破基线（植一条即红）。"""
+def test_planted_commit_style_clue_is_counted_and_located():
+    """对照测试：往"提交信息"里植一条定位线索 → 必须**被数进去且能定位到那一条**。
+
+    为什么不用 `len(hits) > GIT_TEXT_BASELINE` 当判据（九轮 CI 实测教训）：CI 的 checkout 是
+    浅历史，`git log` 只有 HEAD 一条，真实基线命中数在那里是 0，植一条也只能到 1 →
+    `1 > 2` 判红。那条判据把"本地有完整历史"当前提，属**测试环境假设**混进了产品闸。
+    换成"多一条且来源可指认"，与历史深度无关，空转照样抓得住。
+    """
     import sys
 
     sys.path.insert(0, str(REPO / "scripts"))
     import scan_public_leak as spl
 
-    lines = spl._git_text_lines(REPO) + [("git:commit:planted0", 1, "见 " + "/".join(["D:", "Obsidian"]) + " 里的登记")]
-    hits = spl.scan_lines(lines)
-    assert len(hits) > spl.GIT_TEXT_BASELINE, "植入的线索没被数进去＝第三出口闸是空转"
+    base = spl.scan_lines(spl._git_text_lines(REPO))
+    planted_line = ("git:commit:planted0", 1, "见 " + "/".join(["D:", "Obsidian"]) + " 里的登记")
+    hits = spl.scan_lines(spl._git_text_lines(REPO) + [planted_line])
+    assert len(hits) == len(base) + 1, f"植一条线索却多了 {len(hits) - len(base)} 条（或 0 条＝闸空转）"
+    assert any(h["file"] == "git:commit:planted0" for h in hits), (
+        "命中里找不到植进去的那条＝第三出口根本没被扫"
+    )
 
 
 def test_ci_runs_the_leak_gate_with_git_text():

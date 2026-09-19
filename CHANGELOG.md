@@ -74,6 +74,15 @@
   `trace_observe_run_echo`／`trace_observe_run_narrowed`／`trace_400_observe`）。
   **第一版实现被真机冒烟当场判红**：它把 `injection` 事件也放进 run 粒度，结果"收窄"反而比默认更宽 →
   改成"在默认结果之上再筛，只会更少"；口径与近似性（并发同窗口仍会混入）写在 `docs/deployment.md` §二·五。
+- **CI 实测后的两处补记（批次 A 的 CI 红点，逐 job 交账后单独修）**：
+  ①`test_n18_release.py` 的"CI 不得依赖常驻代理进程"用**全文文本**匹配 `hippocampus proxy`，
+  被 W6 那条**英文注释**撞红（本地全绿、CI 五个 job 全红）→ 判据收窄到"只认 `run:` 命令行"，
+  并加对照测试：注释里提不算红、真有一条 `run: hippocampus proxy ...` 必须红。
+  ②`test_n41_r9_ci_honesty.py` 的植桩对照用 `len(hits) > GIT_TEXT_BASELINE` 判定，
+  而 CI 的 checkout 是浅历史（只有 HEAD）→ 真实基线为 0、植一条只到 1，`1 > 2` 判红：
+  这是**把"本地有完整历史"当前提**混进了产品闸。判据改成与历史深度无关的
+  "恰好多一条 **且** 命中的来源可指认成植进去的那条"；同时把 `full` job 的 checkout
+  改成 `fetch-depth: 0`，让"git 对象"这个出口在 CI 里真的覆盖历史而不只是名义扫一遍。
 
 复跑：
 
