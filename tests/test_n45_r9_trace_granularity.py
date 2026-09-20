@@ -70,7 +70,10 @@ def test_default_granularity_is_account_and_unchanged(served):
 
     body = client.get("/trace", headers=_headers(scope.account), params={"run_id": run_id}).json()
     assert body["observe_granularity"] == "account"
-    assert {e["status"] for e in body["observe"]} == {"in-window", "long-ago"}, (
+    # 十轮订正：批 B（X2）后账户级 observe 合法多出**无 status 的 injection 事件**（run_id 穿进写入点），
+    # 本测试的靶子是手工 verification 事件，按事件类型过滤再断言，不针对新事件种类假装它们不存在。
+    verification_events = [e for e in body["observe"] if e.get("event") == "verification"]
+    assert {e["status"] for e in verification_events} == {"in-window", "long-ago"}, (
         "默认粒度本该是账户级全量，收窄了就是改了对外行为"
     )
 
@@ -85,7 +88,8 @@ def test_observe_run_granularity_narrows_to_that_run(served):
     account_events = client.get("/trace", headers=_headers(scope.account), params={"run_id": run_id}).json()["observe"]
     body = client.get("/trace", headers=_headers(scope.account), params={"run_id": run_id, "observe": "run"}).json()
     assert body["observe_granularity"] == "run"
-    assert [e["status"] for e in body["observe"]] == ["in-window"]
+    # 同上订正：run 粒度下对**手工 verification 事件**（无 run_id，落不进窗口）的判据不变
+    assert [e["status"] for e in body["observe"] if e.get("event") == "verification"] == ["in-window"]
     assert len(body["observe"]) <= len(account_events), "run 粒度只会更少，不能比默认还多"
 
 

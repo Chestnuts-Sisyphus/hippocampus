@@ -61,9 +61,14 @@ chromadb  fastapi  httpx  jieba  keyring  langgraph  numpy  onnxruntime  tokeniz
 | `jieba` / `httpx` | 核心依赖 | 中文分词（BM25 通道）、HTTP 客户端 |
 | `chromadb` | `[vector]` 可选 | 语义通道。**不装也能跑**：检索降级为词法通道（`MemoryCore(vector=False)`） |
 | `fastapi` / `uvicorn` | `[proxy]` 可选 | 代理形态 |
-| `langgraph` / `langchain-core` | `[agent]` 可选 | Agent 形态编排 |
-| `keyring` | 未声明（可选探测） | 有则用作密钥服务通道，无则只用环境变量 |
-| `numpy` / `onnxruntime` / `tokenizers` | chromadb 的传递依赖 | 仅显式使用 `onnx:` 嵌入档时需要 |
+| `langgraph` / `langchain-core` | 核心依赖（编排底座；langchain-core 为其传递依赖，白名单在册） | Agent 形态编排 |
+| `keyring` | 未声明（可选探测，闸内白名单） | 有则用作密钥服务通道，无则只用环境变量（try-import，闸 `test_n52` 钉住形态） |
+| `numpy` / `onnxruntime` / `tokenizers` | `[onnx]` 可选（十轮 X15 起显式声明，并已并入 `[all]`） | 神经嵌入档（`onnx:` 前缀）。**订正**：本节旧版写"chromadb 的传递依赖"——靠传递依赖偶遇属声明漂移，X15 收口为显式成档 |
+| `nltk` | `[eval]` + `dev` | 官方判分臂 Porter 词干 |
+
+**十轮 X15 新增一致性闸**：`tests/test_n52_dependency_gate.py`（pytest，CI 必跑）双向检查
+①src 实际 import ⊆ pyproject 声明（可选探测白名单外）；②声明 ⊆ 代码 import（转管理白名单带理由外）。
+复跑：`pytest tests/test_n52_dependency_gate.py`。
 
 ## 四、判据
 

@@ -154,9 +154,9 @@ HIPPOCAMPUS_OFFLINE=1 hippocampus --home <fresh> --account t1 demo --questions 1
 ```bash
 cd D:/AI/Hippocampus
 # 重标定（两档对照）
-PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe scripts/calibrate.py --json D:/tmp/hc7/calib_builtin.json
+PYTHONIOENCODING=utf-8 .venv/Scripts/python.exe scripts/calibrate.py --json calib_bare/calib_builtin.json
 HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-small-zh-v1.5" PYTHONIOENCODING=utf-8 \
-  .venv/Scripts/python.exe scripts/calibrate.py --model onnx:Xenova/bge-small-zh-v1.5 --json D:/tmp/hc7/calib_bge.json
+  .venv/Scripts/python.exe scripts/calibrate.py --model onnx:Xenova/bge-small-zh-v1.5 --json calib_bare/calib_bge_xenova.json
 # demo 阈值断言回归（fresh home）
 HIPPOCAMPUS_OFFLINE=1 PYTHONIOENCODING=utf-8 .venv/Scripts/hippocampus.exe --home D:/tmp/hc7/t1-builtin --account t1 demo --questions 10 --memories
 HIPPOCAMPUS_OFFLINE=1 HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-small-zh-v1.5" PYTHONIOENCODING=utf-8 \

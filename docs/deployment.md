@@ -5,7 +5,7 @@
 
 ## 一、默认：环回单机（推荐，零改动）
 
-- 配置：`host=127.0.0.1`、`port=8765`（`HIPPOCAMPUS_PORT` 可换端口；`doctor` 打印实际值）。
+- 配置：`host=127.0.0.1`（`config.json` 或 `--host` 参数）、`port=8765`（`HIPPOCAMPUS_PORT` 可换端口；`doctor` 打印实际值）。
 - 鉴权：实例令牌（`instance_token`，首次启动生成，`Authorization: Bearer <token>`）——
   环回是"本机进程隔离"的第一道墙，令牌是第二道。
 - **两形态同一启动闸（九轮 W1）**：`hippocampus proxy`（模型口）与 `hippocampus serve`（管理口）
@@ -145,7 +145,7 @@ curl -s "http://127.0.0.1:8765/trace?run_id=<上一条返回的 run_id>" \
 
 ## 三、局域网/公网暴露（**不推荐**，真需要时按下面做）
 
-1. **换监听地址**：`config.json` 或环境变量把 `host` 改为 `0.0.0.0`（任意网卡）或具体内网 IP。
+1. **换监听地址**：`config.json` 或 `--host` 参数把 `host` 改为 `0.0.0.0`（任意网卡）或具体内网 IP。
 2. **必须有令牌**：实例令牌默认就有；**不要**关掉鉴权跑公网。
 3. **前置 TLS**：本项目代理是明文 HTTP——公网/跨网段请放在反向代理（nginx/caddy）后面终结 TLS，上游指向 `127.0.0.1:8765`；**已验证**（CI live_proxy_smoke 远程绑定测试通过）。
 4. **出站只留 https**：项目自身出站默认仅 https（`validate_outbound_url` 拒环回/私有/保留之外
@@ -163,4 +163,19 @@ hippocampus doctor                 # host/port/锁/索引健康/凭据有无
 netstat -ano | grep :8765          # 只在本机监听 = 默认安全面
 ```
 
-> 部署边界一句话：**默认环回+令牌，够了就别开网卡**；真要暴露，前置 TLS 且保留令牌。
+## 六、日志轮转配置（X19）
+
+审计与观察日志采用**大小轮转**机制，避免长期运行磁盘无界增长。可用环境变量覆盖默认值：
+
+| 变量名 | 含义 | 默认值 | 取值范围 |
+|---|---|---|---|
+| `HIPPOCAMPUS_LOG_MAX_BYTES` | 单文件上限（到达后触发滚动） | `8388608` (8 MiB) | ≥65536 (64 KiB)，≤1TB |
+| `HIPPOCAMPUS_LOG_KEEP` | 保留的滚动份数（不含当前文件） | `3` | 0–20 份 |
+| `HIPPOCAMPUS_SESSION_BUCKETING` | 会话时间分桶粒度 | `"day"` | `hour`／`day`／`week` |
+
+滚动规则：`x.jsonl` → `x.jsonl.1` → `x.jsonl.2` … 超过 `keep` 份的最旧一份直接丢弃。
+软失败：任何异常只记 stderr，绝不阻断注入／固化主流程。
+
+应用日志：`audit.jsonl`／`observe.jsonl`／`trajectory/*.jsonl` 均受此配置约束。
+
+> 部署边界一句话：**默认环回 + 令牌，够了就别开网卡**；真要暴露，前置 TLS 且保留令牌。

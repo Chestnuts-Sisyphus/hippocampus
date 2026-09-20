@@ -145,7 +145,7 @@ memory writes are safe-ident/safe-DDL checked, and offline mode means *no outbou
 
 ## 🧪 Tests & CI
 
-- **608 pytest tests** (3 xfailed) — memory core, both forms, guards, embedding tiers, public-bench
+- **649 pytest tests** (3 xfailed) — memory core, both forms, guards, embedding tiers, public-bench
   adapters, official judging arm; all offline-runnable (`pytest --basetemp=D:/tmp/pt`).
 - Demo eval runs in CI with **threshold assertions** (memory on ≥9/10, memory off ≤6/10) — score
   regressions turn the pipeline red.

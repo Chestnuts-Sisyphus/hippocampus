@@ -81,6 +81,8 @@ gh run view 35425865217 -R Chestnuts-Sisyphus/hippocampus --log-failed   # 本�
 | `tests/test_n39_r9_version_single_source.py` | 300（跑 `--version` 子进程的死锁兜底） |
 | `tests/test_n41_r9_ci_honesty.py` | 300（跑 pytest 子进程的死锁兜底） |
 | `tests/test_n43_r9_doc_reference_hygiene.py` | 60（取 tracked 清单的子进程超时，纯防挂） |
+| `tests/test_n49_cli_assertions.py` | 原式 `timeout`＝`run_hippo(args, timeout=30)` 的默认参数决定（每条 CLI 子命令 30 秒请求超时，超时即判红，十轮 X5） |
+| `tests/test_n50_learning_enabled.py` | 原式 `timeout`＝`run_hippo(args, timeout=30)` 的默认参数决定（同上口径，十轮 X6） |
 | `scripts/bench_multi_account.py` | 0.1（并发轮询间隔）／3（线程 join；不在 CI 断言链上） |
 | `scripts/demo_flow.py` | 0.25（就绪轮询间隔）／1（单探针请求超时）／15（代理一轮请求超时）／300（就绪死线与 join 兜底） |
 | `scripts/live_management_smoke.py` | 0.2（就绪轮询间隔）／2（单探针请求超时）／15／30／60（各端点请求超时）／180（seed 子进程兜底）／300（起服务死线 `STARTUP_DEADLINE_S`） |

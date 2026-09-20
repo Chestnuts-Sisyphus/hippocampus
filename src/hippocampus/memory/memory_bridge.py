@@ -994,7 +994,6 @@ def prepare_injection(
                     [r['doc_id'] for r in filtered] + list(stable_ids),
                     run_id,
                 )
-                )
             except Exception as e:
                 sys.stderr.write(f"[memory] 注入观察记录失败（不中断）: {e}\n")
 

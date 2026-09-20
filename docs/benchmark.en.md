@@ -3,6 +3,13 @@
 > Companion to `docs/benchmark.md` §二·三 (Chinese full protocol; the section numbering there is CJK). This page exists so
 > non-Chinese readers can audit **how the official scores were produced and how to re-run them**.
 > Source of truth for the numbers: the results document (数字正本, cited in `docs/release-sync.md`).
+>
+> **X14 note (batch 10)**: the 400-question judging artifact JSON is generated at
+> `D:/tmp/hc-bench/lme_official_400.json` — a zero-cost **derived slice** (qid ascending, first 400)
+> of the judged full batch `lme_official_500b.json` (deepseek-judge, 2026-09-18; labels untouched).
+> Subset figures: n_judged=400, accuracy 75.0% (Wilson CI 70.5%–79.0%). Regenerate with:
+> `python scripts/bench_judge_subset.py --report D:/tmp/hc-bench/lme_official_500b.json --n 400 --out D:/tmp/hc-bench/lme_official_400.json`
+> Note: `lme_official_500.json` has `label=None` on all 500 rows (未判成批), so it cannot serve as the source.
 
 ## 1. What is measured
 

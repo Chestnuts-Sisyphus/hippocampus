@@ -36,6 +36,9 @@ dependencies = [
 [project.optional-dependencies]
 # 向量索引（四通道检索的语义通道）。缺省安装下语义通道降级为纯词法，其余通道不受影响。
 vector = ["chromadb>=0.5"]
+# 神经嵌入档（`onnx:` 前缀，如 bge-small）：embedding_models 显式 import 这三件。
+# 十轮 X15：此前靠 chromadb 传递依赖"偶遇"，属未声明漂移 → 显式成档。
+onnx = ["onnxruntime>=1.17", "tokenizers>=0.15", "numpy>=1.26"]
 # 官方判分臂（bench --model-arm）：LoCoMo 官方 F1 的 Porter 词干（nltk）
 eval = ["nltk>=3.8"]
 # 代理形态：OpenAI 兼容端点
@@ -45,6 +48,9 @@ agent = ["langchain-openai>=0.2"]
 # 全部形态（含向量通道与代理端点；离线档不需要这些）
 all = [
   "chromadb>=0.5",
+  "onnxruntime>=1.17",
+  "tokenizers>=0.15",
+  "numpy>=1.26",
   "fastapi>=0.110",
   "uvicorn>=0.27",
   "langchain-openai>=0.2",

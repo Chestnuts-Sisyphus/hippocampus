@@ -153,6 +153,18 @@ jobs:
             --home-root "${{ runner.temp }}/abl-ch-ci" \
             --sentinel --sentinel-threshold 25.0
 
+      - name: Round-10 X16 three-form cross-session demo + multi-account steady stress (offline, zero credentials)
+        # Round-9 gap: both scripts were "manual-only" artifacts despite docs claiming
+        # CI-ability (benchmark.md section 2.6 says multi-account "CI can carry it";
+        # roadmap section 6 records demo_flow as hardware-verified). Wired here so they
+        # cannot silently rot. demo_flow asserts A1-A4 (cross-session memory across
+        # core/agent/proxy forms); bench_multi_account asserts evidence-hit >=98% and
+        # peak working set <2000 MB (sentinels built into the script). 50 accounts keeps
+        # CI runtime ~8s; the 200-account figure stays a local re-run (benchmark.md 2.6).
+        run: |
+          python scripts/demo_flow.py --home "${{ runner.temp }}/hc-demo-flow" --port 8765
+          python scripts/bench_multi_account.py --accounts 50 --json "${{ runner.temp }}/multi_account_ci.json"
+
       - name: 示例库扫描（无个人数据、无真实记忆）
         # scan_personal_data expects the demo ROOT (hippocampus.db lives at root level,
         # seed --account ci writes into <root>/hippocampus.db; accounts/<name>/ holds jsonl only)

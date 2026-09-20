@@ -1,5 +1,7 @@
 """八轮 V5＋V9：真机冒烟进 pytest 常驻，并把 `/trace` 的**真响应字段**与文档钉在一起。
 
+以及 X8：增加真实端口探测逻辑。
+
 和 `scripts/live_management_smoke.py` 共用同一份实现（不写第二套起服务代码）：
 本文件把它当成 fixture 用，一次真进程冒烟的结果既喂语义断言，也喂文档一致性断言。
 
@@ -11,6 +13,7 @@ from __future__ import annotations
 
 import importlib.util
 import re
+import socket
 from pathlib import Path
 
 import pytest
@@ -20,6 +23,18 @@ SMOKE_SCRIPT = REPO / "scripts" / "live_management_smoke.py"
 DEPLOYMENT = REPO / "docs" / "deployment.md"
 
 pytest.importorskip("uvicorn", reason="真机冒烟需要 uvicorn（proxy extra）")
+
+
+def _port_free(host: str, port: int) -> bool:
+    """X8：真实端口探测逻辑——直接尝试连接，而非依赖脚本内部判断。"""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(1)
+        result = sock.connect_ex((host, port))
+        sock.close()
+        return result != 0
+    except Exception:
+        return True
 
 
 def _smoke_module():
@@ -56,6 +71,26 @@ def test_process_is_cleaned_up(live):
 def _is_serve(cmdline) -> bool:
     parts = [str(x) for x in (cmdline or [])]
     return "hippocampus.cli" in " ".join(parts) and "serve" in parts
+
+
+def test_port_detection_logic():
+    """X8：端口探测必须是**真实 bind 探测**（批 A 残桩订正：前版引用了脚本不存在的
+    `mem_config.get_proxy_config`，且把"服务在跑"当测试前提——fixture 是 dict 并非活服务）。
+
+    判据两条：① 脚本 `free_port()` 选出的端口必须真能 bind（自由口的定义）；
+    ② 自占期间用同一探测方式必须判"占用"，释放后回到"空闲"——探测逻辑双向有效。
+    """
+    smoke = _smoke_module()
+    port = smoke.free_port()
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        probe.bind(("127.0.0.1", port))  # ①：free_port 给的口要真 bind 得动
+        probe.listen(1)
+        assert not _port_free("127.0.0.1", port), f"自绑端口{port}后探测仍判空闲 → 探测逻辑失真"
+    finally:
+        probe.close()
+    assert _port_free("127.0.0.1", port), f"释放后端口{port}应回到空闲（②双向判据）"
 
 
 def test_trace_response_fields_match_the_docs_table(live):

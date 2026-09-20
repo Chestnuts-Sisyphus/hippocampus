@@ -88,7 +88,47 @@ DEFAULT_TIER = "builtin-hash"
 # 量出数值并移进 `TIER_PARAMS`（当时的成因写在 `scripts/calibrate.py`：标定集是中文样本，
 # 用它量英文档没有意义 → 消解方式就是补一套主题一一对应的英文集）。
 # 机制**保留不删**：以后再有"文档承诺但未标定"的档，登记进来即可复用同一条不静默告警。
+#
+# 参数级告警增强（X10）：对每个未标定档，打印其缺失的具体参数键名列表，
+# 方便快速定位需要标定的维度（answer_floor / absolute_floor / cliff 系列等）。
 UNCALIBRATED_TIERS: frozenset[str] = frozenset()
+
+# 参数级标定清单（X10）：为每个已知嵌入档列出完整的参数键名与实测值，
+# 作为"已标定"的对照基准。未知档会提示"缺以下参数"而非笼统的"无标定值"。
+PARAMETER_TIER_MAP: dict[str, list[tuple[str, float]]] = {
+    "builtin-hash": [
+        ("absolute_floor", 0.10),
+        ("cliff_gap_min", 0.06),
+        ("cliff_ratio", 0.25),
+        ("restate_threshold", 0.40),
+        ("semantic_dup_threshold", 0.80),
+        ("answer_floor", 0.17),
+    ],
+    "onnx:Xenova/bge-small-zh-v1.5": [
+        ("absolute_floor", 0.50),
+        ("cliff_gap_min", 0.08),
+        ("cliff_ratio", 0.30),
+        ("restate_threshold", 0.58),
+        ("semantic_dup_threshold", 0.85),
+        ("answer_floor", 0.465),
+    ],
+    "onnx_mini_lm_l6_v2": [
+        ("absolute_floor", 0.30),
+        ("cliff_gap_min", 0.10),
+        ("cliff_ratio", 0.30),
+        ("restate_threshold", 0.80),
+        ("semantic_dup_threshold", 0.85),
+        ("answer_floor", 0.35),
+    ],
+    "onnx:Xenova/bge-small-en-v1.5": [
+        ("absolute_floor", 0.50),
+        ("cliff_gap_min", 0.08),
+        ("cliff_ratio", 0.30),
+        ("restate_threshold", 0.58),
+        ("semantic_dup_threshold", 0.85),
+        ("answer_floor", 0.649),
+    ],
+}
 
 
 def params_for_tier(model: str) -> dict[str, Any]:
@@ -108,8 +148,20 @@ def _warn_tier_fallback(model: str) -> None:
         detail = "该档已登记为**未标定缺口**（原因与消解方式见 UNCALIBRATED_TIERS 注释）"
     else:
         detail = "档位表里没有这一键，参数按内置档回落——**换嵌入档没换量纲，检索阈值会错位**"
+    # X10 参数级告警：列出缺失的具体参数键名
+    missing_params = []
+    if model in PARAMETER_TIER_MAP:
+        # 已知档但被回退（理论上不会发生，除非 TIER_PARAMS 被篡改）
+        known = PARAMETER_TIER_MAP[model]
+        missing_params = [f"{k}={v}" for k, v in known]
+    else:
+        # 未知档：列出所有标准参数名
+        all_keys = list(TIER_PARAMS[DEFAULT_TIER].keys())
+        missing_params = all_keys
+    missing_str = ", ".join(missing_params)
     print(
         f"[warning] 嵌入档 {model!r} 无标定值：{detail}；"
+        f"缺失参数：{missing_str}；"
         f"请用 `python scripts/calibrate.py --model {model}` 量出来后写进 memory/calibration.py。",
         file=sys.stderr,
     )
@@ -162,4 +214,12 @@ def apply_tier_params(conn: sqlite3.Connection, model: str, *, force: bool = Fal
     return params
 
 
-__all__ = ["DEFAULT_TIER", "TIER_PARAMS", "UNCALIBRATED_TIERS", "apply_tier_params", "has_tier", "params_for_tier"]
+__all__ = [
+    "DEFAULT_TIER",
+    "TIER_PARAMS",
+    "UNCALIBRATED_TIERS",
+    "PARAMETER_TIER_MAP",
+    "apply_tier_params",
+    "has_tier",
+    "params_for_tier",
+]

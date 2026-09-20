@@ -22,11 +22,16 @@ curl -L -o longmemeval_oracle.json \
 |---|---|---|
 | `locomo10.json` | 2.8 MB（10 段对话 / 1986 题） | `79fa87e90f04081343b8c8debecb80a9a6842b76a7aa537dc9fdf651ea698ff4` |
 | `longmemeval_oracle.json` | 15 MB（500 题） | `821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c` |
+| `longmemeval_s_cleaned.json`（S 难档） | 277 MB（277,383,467 B，500 题，每题 haystack ≈53 会话） | `d6f21ea9d60a0d56f34a05b609c79c88a451d2ae03597821ea3d5a9678c3a442` |
 
 ```bash
 certutil -hashfile locomo10.json SHA256        # Windows
 sha256sum locomo10.json                        # Linux/macOS
 ```
+
+> **X13 修复说明（十轮）**：S 难档 `longmemeval_s_cleaned.json` 的 sha256 已本机实测补全
+> （2026-09-20 对 `D:/tmp/hc-bench/longmemeval_s_cleaned.json` 跑 `sha256sum`，文件 2026-09-18 落盘，
+> revision 同上）。复算命令：`sha256sum D:/tmp/hc-bench/longmemeval_s_cleaned.json`。
 
 LongMemEval 还有一个 277 MB 的 `longmemeval_s_cleaned.json`（每题 haystack ≈53 个会话），
 需要更大规模时按同样方式取（revision 同上）。
@@ -75,10 +80,13 @@ HIPPOCAMPUS_OFFLINE=1 .venv/Scripts/python.exe scripts/bench_ab.py \
 | 档（臂） | 批 A/B | 80 题 A/B（样本级） | 全量 1986 题（k=8／k=20） | 说明 |
 |---|---|---|---|---|
 | `builtin-hash`（默认，臂＝词法档） | 批 A | — | 36.7%／37.2%（k=8／k=20，批 A） | 零下载、纯词法哈希；英文召回弱是它的**已知边界** |
-| **`bge-small-en-v1.5`（384 维，推荐档）** | 批 A＋批 B | 33.8%（样本级） | **45.7%（批 A，k=8）**；**45.2%／49.8%（批 B，k=8／k=20）** | 126 MB、p50 45.8 ms（比默认档还快） |
-| `bge-base-en-v1.5`（768 维） | 批 A＋批 B | 41.3%（样本级） | **47.8%（批 A，k=8）**；**46.5%／48.8%（批 B，k=8／k=20）** | 415 MB、768 维，**同批（批 B）与 bge-small 打平** → 不划算 |
-| `gte-small`（mean 池化） | — | 27.5%（样本级） | 未跑 | 本任务上更差 → 不推荐 |
+| **`onnx:Xenova/bge-small-en-v1.5`（384 维，推荐档）** | 批 A＋批 B | 33.8%（样本级） | **45.7%（批 A，k=8）**；**45.2%／49.8%（批 B，k=8／k=20）** | 126 MB、p50 45.8 ms（比默认档还快） |
+| `onnx:Xenova/bge-base-en-v1.5`（768 维） | 批 A＋批 B | 41.3%（样本级） | **47.8%（批 A，k=8）**；**46.5%／48.8%（批 B，k=8／k=20）** | 415 MB、768 维，**同批（批 B）与 bge-small 打平** → 不划算 |
+| `gte-small`（mean 池化） | — | 27.5%（样本级） | 未跑 | 本任务上更差 → 不推荐（未知档，降级为 builtin-hash 参数） |
 | `bge-small-en` ＋ 官方英文查询指令 | 仅样本批 | 32.5%（样本级，80 题） | **未跑全量**（旧版本此格误抄了 base/small 的数，九轮 W7 订正） | 样本上就低于同批不带指令的 33.8% → 无收益（＋80 tokens）→ **不登记** |
+
+> **X9 修复说明**：表中所有嵌入档键名已按 TIER_PARAMS 统一加前缀 `onnx:Xenova/`。
+> `gte-small` 为未标定档，运行时自动降级为 builtin-hash 参数并输出告警（见 calibration.py）。
 
 > **小样本会骗人**：80 题的 95% 置信区间约 ±8 pp。上表 bge-base 在 80 题上领先 7.5 pp，
 > 全量上只差 1.3 pp 且 k=20 时反超——**换档结论必须用全量（或明确标注"样本级"）**。
@@ -130,6 +138,9 @@ HIPPOCAMPUS_OFFLINE=1 HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-base-en-v1.5"
 | LongMemEval-oracle（早先抽样批，留作口径历史） | 抽 200 | 70.5%（63.8%–76.4%，Wilson） | 100.0%／48.5% | ≈¥0.45／¥0.39 |
 | LoCoMo-10（基线） | 全量 1986 | F1 **32.55%（30.8%–34.4%，bootstrap）** | 45.52%／17.37% | ≈¥3.87／滞后未显 |
 | LoCoMo-10 + `--neighbors` | 全量 1986 | F1 **38.68%（36.8%–40.5%，bootstrap）** | 63.65%／22.7% | 同批 |
+
+> **X12 修复说明**：parity 闸现已扩展到检索指标（证据命中／答在文内），与官方分同表展示。
+> 所有批次数字均带明确标注（批 A/B、样本规模、臂名），避免混用。
 
 - LME 分型（全量 500，官方 judge 口径）：knowledge-update 84.6（n=78）、temporal-reasoning 76.7（n=133）、
   multi-session 62.4（n=133）、single-session-assistant 41.1（n=56）、single-session-preference 96.7（n=30）、
