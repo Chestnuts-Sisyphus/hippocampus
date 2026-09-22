@@ -1,0 +1,152 @@
+{
+  "derived_from": "官方判分臂报告的 official.rows × 顶层 rows[].category（按 qid 关联），零花费纯派生：判分口径与分数未动",
+  "source": {
+    "file_name": "lme_official_500b.json",
+    "sha256": "36d39703e7230ef535492823642e28f3538d022755f19a8556a246c493cf9e5b",
+    "dataset_sha256": "821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c",
+    "bench": "longmemeval",
+    "generated_at": 1789730629,
+    "n_items": 500,
+    "n_done": 500,
+    "n_failed": 0,
+    "n_skipped": 0
+  },
+  "protocol": {
+    "model": "deepseek-chat",
+    "judge": "deepseek-judge",
+    "input_spec": "记忆层注入上下文（top-8，inject_finalize 原文）；不是全文",
+    "metric": "官方 LLM 判分准确率（judge yes/no，官方 prompt 逐题型）",
+    "report_accuracy": 0.742,
+    "report_ci95": [
+      0.7019,
+      0.7784
+    ]
+  },
+  "overall": {
+    "n": 500,
+    "n_correct": 371,
+    "accuracy": 74.2,
+    "ci95_wilson": [
+      70.19,
+      77.84
+    ]
+  },
+  "by_question_type": {
+    "knowledge-update": {
+      "n": 78,
+      "n_correct": 66,
+      "accuracy": 84.62,
+      "ci95_wilson": [
+        75.01,
+        90.97
+      ]
+    },
+    "multi-session": {
+      "n": 133,
+      "n_correct": 83,
+      "accuracy": 62.41,
+      "ci95_wilson": [
+        53.93,
+        70.18
+      ]
+    },
+    "single-session-assistant": {
+      "n": 56,
+      "n_correct": 23,
+      "accuracy": 41.07,
+      "ci95_wilson": [
+        29.17,
+        54.12
+      ]
+    },
+    "single-session-preference": {
+      "n": 30,
+      "n_correct": 29,
+      "accuracy": 96.67,
+      "ci95_wilson": [
+        83.33,
+        99.41
+      ]
+    },
+    "single-session-user": {
+      "n": 70,
+      "n_correct": 68,
+      "accuracy": 97.14,
+      "ci95_wilson": [
+        90.17,
+        99.21
+      ]
+    },
+    "temporal-reasoning": {
+      "n": 133,
+      "n_correct": 102,
+      "accuracy": 76.69,
+      "ci95_wilson": [
+        68.82,
+        83.07
+      ]
+    }
+  },
+  "join": {
+    "n_types": 6,
+    "n_qid_with_question_type": 500,
+    "n_rows_without_question_type": 0,
+    "n_qid_unjoined": 0,
+    "n_unjudged": 0,
+    "n_skipped": 0
+  },
+  "cross_check_vs_report_by_category": [
+    {
+      "question_type": "knowledge-update",
+      "derived_n": 78,
+      "report_n": 78,
+      "derived_accuracy": 84.62,
+      "report_accuracy": 84.62,
+      "match": true
+    },
+    {
+      "question_type": "multi-session",
+      "derived_n": 133,
+      "report_n": 133,
+      "derived_accuracy": 62.41,
+      "report_accuracy": 62.41,
+      "match": true
+    },
+    {
+      "question_type": "single-session-assistant",
+      "derived_n": 56,
+      "report_n": 56,
+      "derived_accuracy": 41.07,
+      "report_accuracy": 41.07,
+      "match": true
+    },
+    {
+      "question_type": "single-session-preference",
+      "derived_n": 30,
+      "report_n": 30,
+      "derived_accuracy": 96.67,
+      "report_accuracy": 96.67,
+      "match": true
+    },
+    {
+      "question_type": "single-session-user",
+      "derived_n": 70,
+      "report_n": 70,
+      "derived_accuracy": 97.14,
+      "report_accuracy": 97.14,
+      "match": true
+    },
+    {
+      "question_type": "temporal-reasoning",
+      "derived_n": 133,
+      "report_n": 133,
+      "derived_accuracy": 76.69,
+      "report_accuracy": 76.69,
+      "match": true
+    }
+  ],
+  "privacy": {
+    "per_question_rows_included": false,
+    "note": "本摘要只含聚合值（n／对数／准确率／Wilson 区间）与哈希；逐题 question／gold／prediction／注入上下文不写入，需要时另写仓外明细件。"
+  }
+}

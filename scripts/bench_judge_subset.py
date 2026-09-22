@@ -5,8 +5,12 @@
 判分口径与分数**一律未动**——本脚本是切片器，不是评测器。
 
 跑法：
-    python scripts/bench_judge_subset.py --report D:/tmp/hc-bench/lme_official_500.json \
+    python scripts/bench_judge_subset.py --report D:/tmp/hc-bench/lme_official_500b.json \
         --n 400 --out D:/tmp/hc-bench/lme_official_400.json
+
+⚠ **正本必须用 `lme_official_500b.json`**（500 行 label 齐全）。`lme_official_500.json` 的 500 行
+`label` 全为 `None`（未判成批，实测 `n_judged=0`），拿它切出来的子集准确率恒为 0，**不可作输入**
+（GG1 于 2026-09-22 实测校正；同口径见 `docs/benchmark.en.md` 文首注）。
 """
 
 from __future__ import annotations

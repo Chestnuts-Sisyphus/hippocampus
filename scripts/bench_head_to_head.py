@@ -1,4 +1,18 @@
-"""竞品横比实验管线：复用 bench_ab 的 A/B 结构，将竞品记忆层作为 variant 接入。
+"""⚠ **实验脚手架 · mock 近似 · 无结论——不要引用本脚本的任何数。**
+
+三个"竞品"全是本文件内的 mock 类（`Mem0Mock` / `ZepMock` / `LettaMock`），本项目
+**从未安装或调用过** Mem0 / Zep / Letta 本体：`Mem0Mock` 读本机缓存里的预存 QA 对，
+`ZepMock` 取前 top-k 轮用户话语，`LettaMock` 取会话中间两轮——它们只近似"注入预算相当"，
+**不测竞品行为**。竞品检索延迟**从未被量测**（此前那三个延迟常数是写死的假设值，已删除）。
+本脚本在本机**从未真跑过**：仓外评测产物目录无任何 h2h 报告，`docs/` 与 README 也不引用它。
+
+因此它当前的价值只有一条：**接口形状已搭好**。要得到可引用的横比结论，必须真实部署竞品、
+跑一笔付费批次，并按 `docs/benchmark.md` §〇 的"批次／规模／臂"标注纪律登记。
+横比口径的正本见 `docs/benchmark.md` §二·十。
+
+---
+
+竞品横比实验管线：复用 bench_ab 的 A/B 结构，将竞品记忆层作为 variant 接入。
 
 目标：同题集、同模型臂、同注入预算下，对比 Hippocampus 与竞品（Mem0/Zep/Letta）的
 - F1/准确率（官方判分口径）
@@ -60,11 +74,11 @@ from hippocampus.eval import public_bench as pb  # noqa: E402
 
 @dataclass
 class CompetitorResponse:
-    """竞品的一道题检索响应。"""
+    """竞品的一道题检索响应（mock：见文件头——竞品本体从未被调用过）。"""
 
     context: str = ""  # 注入上下文原文
     tokens: int = 0  # 估算 tokens
-    latency_ms: float = 0.0  # 单次检索延迟
+    latency_ms: float | None = None  # **未实测**：竞品真实检索延迟从未被量测，不要填假设值
     metadata: dict[str, Any] = field(default_factory=dict)  # 额外信息（如命中条目数）
 
 
@@ -97,10 +111,9 @@ class Mem0Mock:
                 return CompetitorResponse(
                     context=context,
                     tokens=len(context) // 2 + 40 if context else 0,
-                    latency_ms=15.0,  # 假设值
                     metadata={"source": "mem0", "variant": "v0.1"},
                 )
-        return CompetitorResponse(context="", tokens=0, latency_ms=0.0, metadata={"source": "mem0", "error": "no match"})
+        return CompetitorResponse(context="", tokens=0, metadata={"source": "mem0", "error": "no match"})
 
 
 class ZepMock:
@@ -121,7 +134,6 @@ class ZepMock:
         return CompetitorResponse(
             context=context,
             tokens=len(context) // 2 + 40 if context else 0,
-            latency_ms=12.0,  # 假设值
             metadata={"source": "zep", "top_k": self.top_k},
         )
 
@@ -146,7 +158,6 @@ class LettaMock:
         return CompetitorResponse(
             context=context,
             tokens=len(context) // 2 + 40 if context else 0,
-            latency_ms=10.0,  # 假设值
             metadata={"source": "letta", "radius": self.radius},
         )
 

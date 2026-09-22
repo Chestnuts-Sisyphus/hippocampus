@@ -4,6 +4,36 @@
 > 数字本身写在 `docs/roadmap.md` 与结果报告里；**官方分**（LLM 作答 + LLM 判分）已实现，
 > 走 `bench --model-arm` 显式开关（见 §二·三）——离线档不报，不显式开就不出站、不编数字。
 
+## 〇、口径声明（读任何数字前先读这一节）
+
+> 这一节是**引用纪律**，不是成绩说明：下面每个数都只能在它自己的口径里被引用。
+> 缺任一条限定就说出口，等于把数字讲成了别的东西。
+
+**口径三件套（2026-09-18 全量批，n=500，必须整句一起带）**
+
+1. **注入的是记忆层选出的上下文，不是全文**——top-8 条，走生产路径 `inject_finalize`。
+   官方喂的是整段对话，我们喂的是记忆层筛出来的 8 条，所以这个分回答的是"记忆系统选得对不对"，
+   **不与全文基线等同**（报告 JSON 的 `official.input_spec` 逐字记录；实现见
+   `src/hippocampus/eval/model_arm.py`）。
+2. **判分是同一个模型自判（self-judge）**：作答与判分都走 `deepseek-chat`、temperature 0，
+   只有 `max_tokens` 不同（作答 500／判分 10）。唯一外控＝同题双判 50 题（换 glm-4-flash）
+   加单向人工抽判 20 题，合计 **n=70 < 100 → 一致性结论未定**（见 §二·三 限定）。
+   因此这个分只能说成"deepseek-judge 口径下的自判分"，**不得说成 judge 无关的客观分**。
+3. **批次与规模必须同带**：LongMemEval-oracle 全量 500 题、2026-09-18 批、0 失败 0 跳过；
+   早先抽样批（200 题）的那个数是**另一批**，两批不同源、不合并引用。
+
+**四条边界（都是实测结论，不是谦虚话）**
+
+| 边界 | 实测事实 | 证据落点 |
+|---|---|---|
+| 自判分 | 作答模型与判分模型是同一个 `cfg["model"]`；`call_chat` 只按 `kind` 分计数、不换模型 | `src/hippocampus/eval/model_arm.py` |
+| 跨批不可互判 | 两个 500 题批 `qid` 全交集，但 prediction 相同的题数＝0 → 标签差异里混着作答漂移，只能当参考 | `scripts/bench_judge_audit.py` 的 `cross.n_same_prediction` |
+| 数字正本在仓外 | 报告 JSON 不入仓（体积＋许可＋逐题明文）；仓内只留**聚合摘要＋哈希** | `results/lme_official_500b_by_type.json` |
+| 四通道高度冗余 | 逐通道消融：关任何一个通道，证据命中都在 ±0.6pp 内（n=497，标准误 ±1.1pp）＝统计打平；**正确讲法是"做了消融并如实报告冗余"，不许讲成差分优势** | §二·五 消融表 |
+
+**竞品横比的口径**：本仓**没有**对 Mem0／Zep／Letta 的可信横比。`scripts/bench_head_to_head.py`
+里的三个竞品全是本仓 mock，该脚本从未真跑过、无结论（见 §二·十）。引用它＝把 mock 当实测。
+
 ## 一、取数据（钉版本 + 校验 sha256）
 
 数据集不进仓库（体积 + 许可），按下面两条命令拉到本机（建议放非系统盘）：
@@ -189,6 +219,62 @@ HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-small-en-v1.5" \
 报告 JSON 的 `official` 段含：模型名／temperature／并发／重试／超时／预算、`input_spec`
 （8 条注入非全文）、调用次数、tokens、估算花费、**跑前/跑后余额与实际花费**、逐题
 prediction/label/error、失败数与跳过数（有失败必须在报告里如实写"未跑完"）。
+
+#### 二·三b 从零复跑头条分（命令链）与分题型派生件
+
+> 目的：让头条分**可被外部独立验证**——输入文件有哈希、派生脚本可复跑、聚合产物在仓里。
+> 三步里只有第 ② 步付费出站（批已冻结，默认不重跑）；第 ①③ 步零花费。
+
+```bash
+# ① 取数据（revision 钉在 URL 里，与 §一 校验表同一份）
+curl -L -o D:/tmp/hc-bench/longmemeval_oracle.json \
+  https://huggingface.co/datasets/xiaowu0162/longmemeval-cleaned/resolve/98d7416c24c778c2fee6e6f3006e7a073259d48f/longmemeval_oracle.json
+sha256sum D:/tmp/hc-bench/longmemeval_oracle.json   # 期望值见下表「数据集 sha256」
+
+# ② 跑官方判分臂（**付费＋出站**：2026-09-18 全量批实测 ≈¥1.104；预算硬停 ¥30）
+export HIPPOCAMPUS_BASE_URL="https://api.deepseek.com/v1" HIPPOCAMPUS_MODEL="deepseek-chat"
+HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-small-en-v1.5" \
+  hippocampus bench longmemeval --data D:/tmp/hc-bench/longmemeval_oracle.json \
+  --model-arm --json D:/tmp/hc-bench/lme_official_500b.json
+
+# ③ 零花费派生：按 question_type 分组的准确率＋Wilson 区间（调模型 0 次、出站 0 次）
+python scripts/bench_judge_by_type.py \
+  --report D:/tmp/hc-bench/lme_official_500b.json \
+  --out results/lme_official_500b_by_type.json
+```
+
+**同源锚点**（任一不符就不是同一批，不许与本文数字并列）：
+
+| 锚点 | 值 |
+|---|---|
+| 数据集 `longmemeval_oracle.json` sha256 | `821a2034d219ab45846873dd14c14f12cfe7776e73527a483f9dac095d38620c`（15 MB，500 题） |
+| 输入报告 `lme_official_500b.json` sha256 | `36d39703e7230ef535492823642e28f3538d022755f19a8556a246c493cf9e5b`（1,643,946 B） |
+| 入仓聚合摘要 sha256 | `0c55bc03b6e35f3d5cdaf2bd428e9c4df13e40ad3d1229e52d00dddf5b966a0d`（3,764 B） |
+| 入仓摘要路径 | `results/lme_official_500b_by_type.json`（只含聚合值＋哈希，无逐题明文） |
+| 批次身份 | 全量 500 题／0 失败 0 跳过／top-8 注入／`deepseek-chat`（作答与判分同模型） |
+
+**派生件实跑输出（六题型；`knowledge-update` 行在列）**
+
+| question_type | n | 判对 | 准确率 | Wilson 95% CI |
+|---|---|---|---|---|
+| knowledge-update | 78 | 66 | 84.62 | 75.01 – 90.97 |
+| multi-session | 133 | 83 | 62.41 | 53.93 – 70.18 |
+| single-session-assistant | 56 | 23 | 41.07 | 29.17 – 54.12 |
+| single-session-preference | 30 | 29 | 96.67 | 83.33 – 99.41 |
+| single-session-user | 70 | 68 | 97.14 | 90.17 – 99.21 |
+| temporal-reasoning | 133 | 102 | 76.69 | 68.82 – 83.07 |
+| **合计（全部题型）** | **500** | **371** | **74.20** | **70.19 – 77.84** |
+
+> 上表数值单位为百分比（pp），故不给百分号，避免与正文其他表的口径混读。
+
+**派生正确性的自校验**：合计行区间 `[70.19, 77.84]` 与报告 JSON 自带 `official.ci95`
+（`[0.7019, 0.7784]`）逐位一致；六个题型的 `n` 与准确率也与报告自带的 `official.by_category`
+逐位一致——这次对账落在派生件的 `cross_check_vs_report_by_category`，六条 `match` 全为 `true`。
+**若有人改了 join 口径（例如把未判题算成判错），这条对账会先红，而不是数字悄悄变。**
+
+> **引用限定**：本节的分题型数字同样受 §〇 的口径三件套约束（自判分、top-8 注入、单批 n=500）。
+> 题型之间的差值**不要当成"能力画像"**：`single-session-preference`（n=30）与
+> `single-session-user`（n=70）样本小，区间宽到可与相邻题型重叠，逐题型比较本身不显著。
 
 ### 二·四 ±1 轮邻居扩展（A1/T7，`--neighbors` 显式开）
 
@@ -383,6 +469,22 @@ HIPPOCAMPUS_OFFLINE=1 HIPPOCAMPUS_EMBEDDING_MODEL="onnx:Xenova/bge-small-en-v1.5
 配错会**静默变差**）→ **终态：不承诺支持 e5，本轮不排期**。理由：换档必须重新标定（硬边界），
 而 e5 在本项目无任何使用场景需求；静默变差比报错更糟，所以宁可明说不支持。
 **翻案触发条件**：有人提交"用 e5 且带前缀"的完整标定档（阈值标定＋对照表＋回归），否则不动。
+
+### 二·十 竞品横比（`scripts/bench_head_to_head.py`）：**实验脚手架、mock 近似、无结论**
+
+> **一句话**：这个脚本**没有**产出任何可引用的横比结论；它从未真跑过，三个"竞品"全是本仓 mock。
+> 引用它的任何输出＝把 mock 当实测。
+
+- **不是实测**：`Mem0Mock`（读本机 HuggingFace 缓存的预存 QA 对，缓存缺失就返回空上下文）、
+  `ZepMock`（取前 `top_k` 轮用户话语）、`LettaMock`（取会话中间 2 轮）三者都只是"注入预算近似"的
+  替代实现。本项目**从未安装或调用过** Mem0／Zep／Letta 本体，因此它测的不是竞品行为。
+- **延迟字段不可用**：三个 mock 的 `latency_ms` 在此前版本里是**写死的假设常数**（15／12／10 ms，
+  原注释自称"假设值"），已删除并改为"未实测"——竞品检索延迟**从未被量测过**。
+- **从未跑过**：仓外评测产物目录里没有任何 h2h 报告文件；`docs/` 与 README 也从未引用它的输出，
+  `results/` 里同样没有它的产物。它的存在价值只是"接口形状已搭好"，不是"结果已得"。
+- **横比问题的正确答案**：本项目**没有**对 Mem0／Zep／Letta 的可信横比，只有自家的绝对值
+  加上 §〇 的口径三件套。要真做横比，需要真实部署竞品＋另一笔付费批次，且必须自带
+  批次／规模／臂标注——这三件目前都不具备。
 
 ## 三、口径（写在表头上，别让读者猜）
 
