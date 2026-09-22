@@ -25,13 +25,13 @@
           },
           "spans": [
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "5f3e3115b216793a",
-              "parentSpanId": "5387ab7ef81a23d3",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "79f1a4cda52424be",
+              "parentSpanId": "54221438e67b7ccf",
               "name": "hippocampus.vector_query",
               "kind": "CLIENT",
-              "startTimeUnixNano": "1790079674530115300",
-              "endTimeUnixNano": "1790079674531116100",
+              "startTimeUnixNano": "1790088226919253200",
+              "endTimeUnixNano": "1790088226921312700",
               "attributes": [
                 {
                   "key": "db.system",
@@ -75,13 +75,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "e7fbeea0997d7d6f",
-              "parentSpanId": "5387ab7ef81a23d3",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "7b943ac487fe76e1",
+              "parentSpanId": "54221438e67b7ccf",
               "name": "hippocampus.vector_query",
               "kind": "CLIENT",
-              "startTimeUnixNano": "1790079674533114400",
-              "endTimeUnixNano": "1790079674533114400",
+              "startTimeUnixNano": "1790088226922409700",
+              "endTimeUnixNano": "1790088226924497000",
               "attributes": [
                 {
                   "key": "db.system",
@@ -125,13 +125,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "addeeab0529e73ae",
-              "parentSpanId": "5387ab7ef81a23d3",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "8d95e7c81ce1cd2b",
+              "parentSpanId": "54221438e67b7ccf",
               "name": "hippocampus.vector_query",
               "kind": "CLIENT",
-              "startTimeUnixNano": "1790079674533114400",
-              "endTimeUnixNano": "1790079674534115200",
+              "startTimeUnixNano": "1790088226924497000",
+              "endTimeUnixNano": "1790088226925543500",
               "attributes": [
                 {
                   "key": "db.system",
@@ -175,13 +175,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "8cf7fd115b6d7ddd",
-              "parentSpanId": "5387ab7ef81a23d3",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "edcb7a1637cac033",
+              "parentSpanId": "54221438e67b7ccf",
               "name": "hippocampus.embedding",
               "kind": "INTERNAL",
-              "startTimeUnixNano": "1790079674534115200",
-              "endTimeUnixNano": "1790079674534115200",
+              "startTimeUnixNano": "1790088226926549000",
+              "endTimeUnixNano": "1790088226927081400",
               "attributes": [
                 {
                   "key": "hippocampus.embedding.text_chars",
@@ -219,13 +219,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "ffddac39a7dc9dac",
-              "parentSpanId": "5387ab7ef81a23d3",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "286a3ef9691c580c",
+              "parentSpanId": "54221438e67b7ccf",
               "name": "hippocampus.vector_query",
               "kind": "CLIENT",
-              "startTimeUnixNano": "1790079674534115200",
-              "endTimeUnixNano": "1790079674535114500",
+              "startTimeUnixNano": "1790088226927081400",
+              "endTimeUnixNano": "1790088226928085400",
               "attributes": [
                 {
                   "key": "db.system",
@@ -269,13 +269,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "10c1ec314c18ef6d",
-              "parentSpanId": "5387ab7ef81a23d3",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "be5456c9abc7181b",
+              "parentSpanId": "54221438e67b7ccf",
               "name": "hippocampus.vector_query",
               "kind": "CLIENT",
-              "startTimeUnixNano": "1790079674535114500",
-              "endTimeUnixNano": "1790079674536115400",
+              "startTimeUnixNano": "1790088226928418500",
+              "endTimeUnixNano": "1790088226929422300",
               "attributes": [
                 {
                   "key": "db.system",
@@ -319,13 +319,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "e325eb1230612b6d",
-              "parentSpanId": "5387ab7ef81a23d3",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "d233795659660fd0",
+              "parentSpanId": "54221438e67b7ccf",
               "name": "hippocampus.embedding",
               "kind": "INTERNAL",
-              "startTimeUnixNano": "1790079674538115300",
-              "endTimeUnixNano": "1790079674538115300",
+              "startTimeUnixNano": "1790088226933030400",
+              "endTimeUnixNano": "1790088226933030400",
               "attributes": [
                 {
                   "key": "hippocampus.embedding.text_chars",
@@ -363,13 +363,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "b4eb06b1bf30cc0d",
-              "parentSpanId": "5387ab7ef81a23d3",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "75961df1dfc59083",
+              "parentSpanId": "54221438e67b7ccf",
               "name": "hippocampus.vector_query",
               "kind": "CLIENT",
-              "startTimeUnixNano": "1790079674538115300",
-              "endTimeUnixNano": "1790079674539115100",
+              "startTimeUnixNano": "1790088226933030400",
+              "endTimeUnixNano": "1790088226934101600",
               "attributes": [
                 {
                   "key": "db.system",
@@ -413,13 +413,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "d1cf4238efd339a7",
-              "parentSpanId": "5387ab7ef81a23d3",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "23e757caf2a7b875",
+              "parentSpanId": "54221438e67b7ccf",
               "name": "hippocampus.vector_query",
               "kind": "CLIENT",
-              "startTimeUnixNano": "1790079674539115100",
-              "endTimeUnixNano": "1790079674540114900",
+              "startTimeUnixNano": "1790088226934101600",
+              "endTimeUnixNano": "1790088226937319500",
               "attributes": [
                 {
                   "key": "db.system",
@@ -463,13 +463,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "123c1b510dbf8f8a",
-              "parentSpanId": "5387ab7ef81a23d3",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "69732365bcc8ae7b",
+              "parentSpanId": "54221438e67b7ccf",
               "name": "hippocampus.embedding",
               "kind": "INTERNAL",
-              "startTimeUnixNano": "1790079674541115200",
-              "endTimeUnixNano": "1790079674542618700",
+              "startTimeUnixNano": "1790088226940976500",
+              "endTimeUnixNano": "1790088226940976500",
               "attributes": [
                 {
                   "key": "hippocampus.embedding.text_chars",
@@ -507,13 +507,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "0cd356396a3f6f5a",
-              "parentSpanId": "5387ab7ef81a23d3",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "1a965be8fce84ce9",
+              "parentSpanId": "54221438e67b7ccf",
               "name": "hippocampus.vector_query",
               "kind": "CLIENT",
-              "startTimeUnixNano": "1790079674542618700",
-              "endTimeUnixNano": "1790079674542618700",
+              "startTimeUnixNano": "1790088226940976500",
+              "endTimeUnixNano": "1790088226942028700",
               "attributes": [
                 {
                   "key": "db.system",
@@ -557,13 +557,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "5387ab7ef81a23d3",
-              "parentSpanId": "d8b8f60870bb545e",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "54221438e67b7ccf",
+              "parentSpanId": "4f44c1d63e64220a",
               "name": "hippocampus.injection",
               "kind": "INTERNAL",
-              "startTimeUnixNano": "1790079674530115300",
-              "endTimeUnixNano": "1790079674544622200",
+              "startTimeUnixNano": "1790088226919253200",
+              "endTimeUnixNano": "1790088226946845700",
               "attributes": [
                 {
                   "key": "hippocampus.injection.flow",
@@ -613,13 +613,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "cd41ebfc255094ca",
-              "parentSpanId": "d8b8f60870bb545e",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "082cf61057465d20",
+              "parentSpanId": "4f44c1d63e64220a",
               "name": "hippocampus.embedding",
               "kind": "INTERNAL",
-              "startTimeUnixNano": "1790079674545622800",
-              "endTimeUnixNano": "1790079674545622800",
+              "startTimeUnixNano": "1790088226949057200",
+              "endTimeUnixNano": "1790088226949057200",
               "attributes": [
                 {
                   "key": "hippocampus.embedding.text_chars",
@@ -657,13 +657,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "15b07ae2baaa3a72",
-              "parentSpanId": "d8b8f60870bb545e",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "8e6b643e88fae433",
+              "parentSpanId": "4f44c1d63e64220a",
               "name": "hippocampus.vector_query",
               "kind": "CLIENT",
-              "startTimeUnixNano": "1790079674545622800",
-              "endTimeUnixNano": "1790079674546623600",
+              "startTimeUnixNano": "1790088226949057200",
+              "endTimeUnixNano": "1790088226950682700",
               "attributes": [
                 {
                   "key": "db.system",
@@ -707,13 +707,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "7ff2a26f2f04b994",
-              "parentSpanId": "d8b8f60870bb545e",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "661e2c3935f32bb1",
+              "parentSpanId": "4f44c1d63e64220a",
               "name": "hippocampus.vector_query",
               "kind": "CLIENT",
-              "startTimeUnixNano": "1790079674547622600",
-              "endTimeUnixNano": "1790079674547622600",
+              "startTimeUnixNano": "1790088226951789900",
+              "endTimeUnixNano": "1790088226952794200",
               "attributes": [
                 {
                   "key": "db.system",
@@ -757,13 +757,13 @@
               }
             },
             {
-              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
-              "spanId": "d8b8f60870bb545e",
+              "traceId": "8638f5286d96ea1c7b5f1ad8f6ab5096",
+              "spanId": "4f44c1d63e64220a",
               "parentSpanId": "",
               "name": "hippocampus.retrieval_request",
               "kind": "INTERNAL",
-              "startTimeUnixNano": "1790079674530115300",
-              "endTimeUnixNano": "1790079674548622500",
+              "startTimeUnixNano": "1790088226919253200",
+              "endTimeUnixNano": "1790088226955452800",
               "attributes": [
                 {
                   "key": "hippocampus.account",
