@@ -132,7 +132,7 @@ def _env(home: Path, stub_base_url: str | None) -> dict[str, str]:
 class ProxyProcess:
     """真起 `hippocampus proxy` 子进程；输出落文件；退出时必杀。"""
 
-    def __init__(self, home: Path, stub_base_url: str, *, host: str = "127.0.0.1", extra: list[str] | None = None, allow_remote: bool = False):
+    def __init__(self, home: Path, stub_base_url: str, *, host: str = "127.0.0.1", extra: list[str] | None = None, allow_remote: bool = False, connect_host: str = "127.0.0.1"):
         self.home = home
         self.port = free_port()
         self.log_path = home / "proxy.log"
@@ -148,7 +148,21 @@ class ProxyProcess:
             stderr=subprocess.STDOUT,
             stdin=subprocess.DEVNULL,
         )
-        self.base_url = f"http://{host}:{self.port}"
+        # 绑定地址 ≠ 连接地址：`--host 0.0.0.0` 是**通配绑定**，不是可路由的目的地址；
+        # 客户端连 `http://0.0.0.0:<port>` 在本机被中间层拦成 502、在 CI 上 300s 拿不到 200。
+        # 因此探测与请求一律走 connect_host，绑定仍按调用方给的 host。
+        self.base_url = f"http://{connect_host}:{self.port}"
+
+    def url(self, path: str) -> str:
+        """本冒烟只打本机环回：协议与主机写死为 http://127.0.0.1，只动态化本进程挑的端口。
+
+        固定主机是刻意的——探针不该有能力打到任意主机（SSRF 面），也不出网。
+        """
+        if not path.startswith("/"):
+            raise SmokeError(f"路径必须以 / 开头：{path!r}")
+        if not (1024 <= self.port <= 65535):
+            raise SmokeError(f"非法端口：{self.port!r}")
+        return f"http://127.0.0.1:{self.port}{path}"
 
     @property
     def token(self) -> str:
@@ -163,7 +177,11 @@ class ProxyProcess:
             if self.process.poll() is not None:
                 raise SmokeError(f"代理进程提前退出（rc={self.process.returncode}），日志见 {self.log_path}")
             try:
-                if httpx.get(f"{self.base_url}/health", timeout=2.0).status_code == 200:
+                # 非环回档 `/health` 同样要令牌（口径见 docs/security.md ⑤ 与 docs/deployment.md §二·五第 2 条）：
+                # 无令牌轮询会一路 401，把"起没起来"误判成超时。令牌文件在起服时落盘，逐轮重读即可。
+                tok = self.token
+                hdrs = {"Authorization": f"Bearer {tok}"} if tok else None
+                if httpx.get(f"{self.base_url}/health", headers=hdrs, timeout=2.0).status_code == 200:
                     return
             except Exception:  # noqa: BLE001 —— 还没监听，正常
                 pass
@@ -306,7 +324,11 @@ def run_smoke(root: Path) -> dict:
             )
             out["auth_401_bad_token"] = badtok.status_code == 401
 
-            # 十轮 X17：非环回成功路径——带 --allow-remote 起服后，健康口与模型列表应免鉴权（环回体验不变），但聊天口需鉴权
+            # 十轮 X17：非环回**成功路径**——带 --allow-remote 起服后，真机能起来、令牌可用，
+            # 且鉴权面按正本收紧（非环回时 `/health`／`/v1/models` 同样要令牌，缺则 401）。
+            # 口径正本：`docs/security.md` ⑤「免鉴权探针口（仅环回）」、
+            # `docs/deployment.md` §二·五第 2 条、`docs/roadmap.md` 八轮 V8／九轮 W1 两行。
+            # 探针一律打 http://127.0.0.1:<本进程挑的随机端口>——协议与主机写死、不出网、不指他机。
             remote_home = root / "home_remote"
             remote_home.mkdir(parents=True, exist_ok=True)
             proxy_remote = ProxyProcess(remote_home, stub_url, host="0.0.0.0", allow_remote=True)
@@ -316,19 +338,19 @@ def run_smoke(root: Path) -> dict:
                 if not token_remote:
                     raise SmokeError(f"远程令牌没生成：{remote_home / 'instance_token'}")
                 hdrs_remote = _hdr(token_remote, account)
+                rp = proxy_remote.port
 
-                # /health 环回档免鉴权 → 200
-                health_remote_noauth = httpx.get(proxy_remote.base_url + "/health", timeout=15)
-                out["health_remote_200_no_auth"] = health_remote_noauth.status_code == 200
-                # /v1/models 同样免鉴权 → 200
-                models_remote_noauth = httpx.get(proxy_remote.base_url + "/v1/models", timeout=15)
-                out["models_remote_200_no_auth"] = models_remote_noauth.status_code == 200
+                # 非环回：/health 缺令牌 → 401（不是 200）
+                out["health_remote_401_no_auth"] = httpx.get(f"http://127.0.0.1:{rp}/health", timeout=15).status_code == 401
+                # 非环回：/v1/models 缺令牌 → 401
+                out["models_remote_401_no_auth"] = httpx.get(f"http://127.0.0.1:{rp}/v1/models", timeout=15).status_code == 401
+                # 非环回：带上令牌后两个探针口可用 → 200
+                out["health_remote_200_with_auth"] = httpx.get(f"http://127.0.0.1:{rp}/health", headers=hdrs_remote, timeout=15).status_code == 200
+                out["models_remote_200_with_auth"] = httpx.get(f"http://127.0.0.1:{rp}/v1/models", headers=hdrs_remote, timeout=15).status_code == 200
                 # 聊天口缺令牌 → 401
-                chat_remote_noauth = httpx.post(proxy_remote.base_url + "/v1/chat/completions", json=chat_body(), timeout=15)
-                out["chat_remote_401_no_auth"] = chat_remote_noauth.status_code == 401
+                out["chat_remote_401_no_auth"] = httpx.post(f"http://127.0.0.1:{rp}/v1/chat/completions", json=chat_body(), timeout=15).status_code == 401
                 # 聊天口带令牌 → 200
-                chat_remote_auth = httpx.post(proxy_remote.base_url + "/v1/chat/completions", headers=hdrs_remote, json=chat_body(), timeout=60)
-                out["chat_remote_200_auth"] = chat_remote_auth.status_code == 200
+                out["chat_remote_200_auth"] = httpx.post(f"http://127.0.0.1:{rp}/v1/chat/completions", headers=hdrs_remote, json=chat_body(), timeout=60).status_code == 200
             finally:
                 proxy_remote.stop()
         finally:
@@ -355,9 +377,11 @@ REQUIRED_KEYS = (
     "auth_401",
     "auth_401_bad_token",
     "remote_refused_rc2",
-    # 十轮 X17：非环回成功路径两态
-    "health_remote_200_no_auth",
-    "models_remote_200_no_auth",
+    # 十轮 X17：非环回成功路径——探针口按正本收紧（缺令牌 401／带令牌 200）＋聊天口两态
+    "health_remote_401_no_auth",
+    "models_remote_401_no_auth",
+    "health_remote_200_with_auth",
+    "models_remote_200_with_auth",
     "chat_remote_401_no_auth",
     "chat_remote_200_auth",
 )
