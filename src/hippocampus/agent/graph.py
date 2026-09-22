@@ -1,7 +1,16 @@
 """Agent 形态：LangGraph 三节点编排（think → act → answer）。
 
-编排层只写"记忆接线"与收口纪律，图的执行、状态、检查点、人在环中断由 LangGraph 提供
+编排层只写"记忆接线"与收口纪律，**图的执行与状态**由 LangGraph 的 `StateGraph` 提供
 （方案 §十七-2：不重复造框架已有的东西）。
+
+**LangGraph 用量边界（与代码一致，讲之前先看这段）**：本仓只 `from langgraph.graph import END, StateGraph`
+——用它的图、状态与条件边；**没用** checkpointer（`MemorySaver`／`SqliteSaver`）也没用
+`interrupt`／`Command` 人在环原语（全仓 0 命中）。所以两件事不归框架：
+
+- 三出口里的 `needs_human` 是**规则式出口**——危险动作确认闸（`agent/tools.py`：白名单＋`confirm`
+  回调，缺省即拒）回"被拒" → `act` 节点置 `needs_human` → 立即收口报明原因；不涉框架的中断／恢复；
+- 轨迹复演（`agent/runner.py::replay`）是**同一张图、同一策略重跑同一任务＋结果指纹比对**
+  （时间戳与本轮新生成的 id 除外），不是从检查点恢复。
 
 三出口（验收 A2）：
 - `completed`        任务完成（有依据地答完／动作做完）
