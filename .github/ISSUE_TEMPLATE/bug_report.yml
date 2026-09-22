@@ -1,0 +1,106 @@
+name: 🐛 缺陷报告 / Bug report
+description: 行为与预期不符、测试红了、某个形态跑不通——请用这个表单。
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢报告。**请先确认这不是"设计如此"**：本项目的边界写在
+        [`docs/roadmap.md`](../blob/main/docs/roadmap.md) 与 [`.github/SECURITY.md`](../blob/main/.github/SECURITY.md)（离线档能力、
+        单机自用定位、无 MCP／第三方工具接入、记忆库单写者）。装完就能跑的体检命令是 `hippocampus doctor`。
+
+        ⚠️ 提交前请把日志里的**个人数据**处理掉：记忆内容、真实岗位 JD 原文、任何 token／key
+        （本项目凭据只从环境变量或系统密钥服务读，日志里出现的 key 请先撤销再贴）。
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: 提交前自检
+      options:
+        - label: 我已跑过 `hippocampus doctor`，并确认问题在离线档（无 key／无网）下可复现，或说明了它只在哪个档出现
+          required: true
+        - label: 我已确认这不是文档里写明的已知限制（roadmap／SECURITY 的"边界"一节）
+          required: true
+        - label: 日志里没有凭据与个人数据（已脱敏）
+          required: true
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 现象
+      description: 你看到什么、期望什么。请给最短复现路径。
+      placeholder: |
+        例：`hippocampus --account t demo --memories` 退出码 1；
+        期望：退出码 0 且打印「记忆开 / 记忆关」两张表。
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: 复现命令（逐条列出，可照抄执行）
+      description: 请写**完整命令**，包括数据根（`--home` 或 `HIPPOCAMPUS_HOME`）。仓库不读你的私人目录，请用临时目录复现。
+      render: bash
+      placeholder: |
+        export HIPPOCAMPUS_OFFLINE=1 HIPPOCAMPUS_HOME=D:/tmp/hc-repro
+        hippocampus doctor
+        hippocampus --account t seed
+        hippocampus --account t demo --questions 10 --memories
+    validations:
+      required: true
+  - type: textarea
+    id: actual-output
+    attributes:
+      label: 实际输出（原文粘贴，别改写）
+      description: 报错栈、退出码、`doctor` 输出。原文比转述有用得多。
+      render: text
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: 版本 / 提交
+      description: |
+        `hippocampus --version` 的输出；若是从源码跑的，给 `git rev-parse --short HEAD`。
+        安装方式（`pip install -e ".[dev,vector,proxy]"` / git+https / PYTHONPATH 直跑）也写一下。
+      placeholder: "0.5.0 / 例如 80200df / pip install -e \".[dev,vector,proxy]\""
+    validations:
+      required: true
+  - type: dropdown
+    id: form
+    attributes:
+      label: 受影响形态
+      description: 本项目的三种能力（记忆核心／代理形态／Agent 形态）走的是同一个 MemoryCore，但入口不同。
+      multiple: true
+      options:
+        - 记忆核心（MemoryCore / 库调用）
+        - 代理形态（`hippocampus proxy`，OpenAI Chat / Responses / Anthropic Messages）
+        - Agent 形态（`hippocampus chat`，LangGraph 三节点）
+        - CLI（doctor / seed / demo / memory / index / bench …）
+        - 不确定
+    validations:
+      required: true
+  - type: dropdown
+    id: tier
+    attributes:
+      label: 依赖档位
+      description: 语义通道要 `[vector]` 额外依赖（chromadb）；只装核心时它按设计降级关闭。
+      options:
+        - 装齐（`[vector,proxy]`）
+        - 只装核心（无 chromadb，语义通道关闭）
+        - 不确定
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: 运行环境
+      description: 操作系统与 Python 版本（CI 跑 Windows / Linux × 3.11 / 3.12 四组合）。
+      placeholder: "Windows 11 / Python 3.11.9；或 Ubuntu 22.04 / Python 3.12"
+    validations:
+      required: true
+  - type: textarea
+    id: extra
+    attributes:
+      label: 补充（可选）
+      description: 你的判断、已经排除的可能、相关讨论链接等。
+    validations:
+      required: false

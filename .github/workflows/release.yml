@@ -1,0 +1,149 @@
+name: Release
+
+# Tag-driven release pipeline (GD1 item 4).
+# Flow: push a semver tag -> build sdist+wheel -> install the built wheel in a clean venv and
+# smoke-test the CLI (doctor + seed + demo) -> upload build artifacts -> attach them to the
+# GitHub Release for that tag.
+#
+# Pyramid staging (deliberately NOT enabled by default):
+#   PyPI publishing is an outward-facing action, so it stays off until the maintainer turns it on.
+#   Recommended way is PyPI **trusted publishing** (no API token to store):
+#     1. On PyPI: Your projects -> Publishing -> add a pending publisher with
+#        Owner = Chestnuts-Sisyphus, Repository = hippocampus,
+#        Workflow = release.yml, Environment = pypi (or leave the environment blank).
+#     2. Uncomment the `publish-pypi` job below and grant it `id-token: write`.
+#     3. No secrets are needed; the OIDC token is exchanged per run.
+#   Note the distribution name is `hippocampus-agent` (the bare name `hippocampus` on PyPI
+#   belongs to an unrelated third-party package -- see README "Naming note").
+#
+# NOTE: comments and step names in this file are English on purpose. Repo convention
+# (AGENTS.md) keeps .github/workflows/*.yml free of non-ASCII text.
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to build and attach artifacts to (e.g. v0.5.0)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+concurrency:
+  # One release per tag; a re-run replaces the previous attempt instead of racing it.
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  PYTHONIOENCODING: "utf-8"
+
+jobs:
+  build-and-release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # workflow_dispatch on a tag input needs the tag objects; full history also lets the
+          # release notes generator see earlier tags.
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Resolve the tag to build
+        id: ref
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          git rev-parse --verify "refs/tags/$TAG" >/dev/null || { echo "tag $TAG not found"; exit 1; }
+          echo "building tag: $TAG"
+
+      - name: Guard - version in pyproject must match the tag
+        # A release whose metadata disagrees with its tag is worse than no release: the wheel
+        # would report a version nobody can look up. Fail loudly instead.
+        run: |
+          python - <<'PY'
+          import os
+          import pathlib
+          import tomllib
+
+          tag = os.environ["TAG"].lstrip("v")
+          version = tomllib.loads(pathlib.Path("pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+          print(f"pyproject version={version}  tag={os.environ['TAG']}")
+          if version != tag:
+              raise SystemExit(f"version mismatch: pyproject says {version}, tag says {tag}")
+          PY
+        env:
+          TAG: ${{ steps.ref.outputs.tag }}
+
+      - name: Build sdist and wheel
+        run: |
+          python -m pip install --upgrade pip build
+          python -m build
+          ls -l dist/
+
+      - name: Smoke-test the built wheel in a clean venv (offline, zero credentials)
+        # Proves the artifact is installable and that a fresh install can run the memory
+        # discipline without a network or an API key -- the same stance CI takes.
+        run: |
+          set -o pipefail
+          python -m venv /tmp/wheel-venv
+          /tmp/wheel-venv/bin/python -m pip install --upgrade pip
+          /tmp/wheel-venv/bin/pip install dist/*.whl
+          export HIPPOCAMPUS_OFFLINE=1 HIPPOCAMPUS_HOME=/tmp/wheel-home
+          /tmp/wheel-venv/bin/hippocampus doctor
+          /tmp/wheel-venv/bin/hippocampus --account ci seed
+          /tmp/wheel-venv/bin/hippocampus --account ci demo --questions 10 --memories | tail -n 5
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist-${{ steps.ref.outputs.tag }}
+          path: dist/*
+          if-no-files-found: error
+
+      - name: Publish / update the GitHub Release and attach artifacts
+        # `gh release create` fails when the release already exists (the repo creates release
+        # notes by hand for tag releases), so create only if missing, then upload with --clobber.
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          TAG="${{ steps.ref.outputs.tag }}"
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "release $TAG exists -> uploading artifacts only"
+          else
+            gh release create "$TAG" --verify-tag --title "$TAG" --generate-notes
+          fi
+          gh release upload "$TAG" dist/* --clobber
+          gh release view "$TAG" --json url,assets --jq '{url: .url, assets: [.assets[].name]}'
+
+  # ---------------------------------------------------------------------------
+  # PyPI publishing: OFF by default (outward-facing action, maintainer's call).
+  # Uncomment this job AND the `needs` wiring is already satisfied by the job name.
+  # Requires a trusted publisher registered on PyPI for this repo + workflow.
+  # ---------------------------------------------------------------------------
+  # publish-pypi:
+  #   needs: build-and-release
+  #   runs-on: ubuntu-latest
+  #   environment:
+  #     name: pypi
+  #     url: https://pypi.org/p/hippocampus-agent
+  #   permissions:
+  #     id-token: write
+  #   steps:
+  #     - uses: actions/download-artifact@v4
+  #       with:
+  #         name: dist-${{ github.ref_name }}
+  #         path: dist
+  #     - uses: pypa/gh-action-pypi-publish@release/v1
+  #       with:
+  #         packages-dir: dist

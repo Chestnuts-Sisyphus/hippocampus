@@ -1,0 +1,86 @@
+name: ✨ 功能建议 / Feature request
+description: 提议一个能力、一条通道、一种配置——请用这个表单。
+title: "[feat] "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        先说清一件事，能省下好几轮往返：**本项目把"可验证"看得比"功能多"重**。
+        所以提案里最有价值的部分不是"加什么"，而是"怎么证明它真的生效"（用什么命令、看什么输出、
+        在哪个既有测试基线上不退化）。仓库里的规矩是：**能跑出来的数字才算数字**，
+        mock／近似必须显式标注（见 `docs/benchmark.md` §二·十 对横比脚本的处理方式）。
+  - type: textarea
+    id: problem
+    attributes:
+      label: 你要解决的问题
+      description: 描述**场景与痛点**，不要先写方案。例：跨会话长任务里，我需要在 X 时点拿到 Y，但现在做不到。
+      placeholder: |
+        例：我同时跑多个 agent 会话写同一个账户，希望区分"这个会话学到的"与"这个账户共有的"，
+        但现在 session 只做归组，检索时两者混在一起。
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: 你的方案（可选但鼓励）
+      description: 你打算怎么改。若涉及记忆层，请说明它落在哪条轨／哪条通道上。
+      placeholder: |
+        例：给 memories 加 namespace 列 + 检索时按 namespace 过滤；
+        写入侧沿用现有三轨（确认轨／非确认轨／观察轨），只多带一个 namespace 取值。
+    validations:
+      required: false
+  - type: dropdown
+    id: area
+    attributes:
+      label: 涉及面
+      multiple: true
+      options:
+        - 记忆核心（存储 / 检索 / 注入 / 生命周期 / 冲突确认）
+        - 代理形态（三种入站协议）
+        - Agent 形态（编排 / 工具 / 轨迹）
+        - 嵌入与向量档（builtin-hash / onnx:bge-small-*）
+        - 评测与基准（bench / 判分臂）
+        - 工程与交付（CI / 打包 / 文档 / 图）
+        - 安全与隐私
+    validations:
+      required: true
+  - type: textarea
+    id: verification
+    attributes:
+      label: 怎么算做完了（可跑的验收）
+      description: 给出命令与期望输出。做不到自动化就写清人工核对的步骤。
+      render: bash
+      placeholder: |
+        python -m pytest tests/test_xxx.py -q            # 期望：新增 N 条全过，既有 649 条不回归
+        python -m hippocampus.cli --account t memory list  # 期望：能看到 namespace=...
+    validations:
+      required: true
+  - type: dropdown
+    id: offline
+    attributes:
+      label: 离线档（无 key / 无网）下的行为
+      description: CI 每次 push 都跑离线档，所以这一项是硬要求。
+      options:
+        - 离线档完全可用（规则化实现）
+        - 离线档降级可用（说明降级到什么程度）
+        - 必须有模型才可用（需要显式开关，不能在默认路径上偷偷出站）
+        - 不确定，想听维护者意见
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: 你考虑过的替代方案 / 为什么不用它们
+      description: 包括"不改代码，靠文档或配置就能解决"这类方案。
+    validations:
+      required: false
+  - type: checkboxes
+    id: honesty
+    attributes:
+      label: 提案纪律（本项目对"声称"的要求）
+      options:
+        - label: 我知道新增能力必须同时给出**可复跑证据**，不能只写"支持 X"
+          required: true
+        - label: 如果提案会让仓库里某个数字／能力描述变化，我会指出需要同步的文档位置
+          required: true

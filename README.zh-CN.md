@@ -8,7 +8,7 @@
 
 **跨会话记忆 agent —— 一个记忆核心（`MemoryCore`），两种消费形态；公开基准官方判分已实测。**
 
-[English](README.md) · [机制](docs/memory-core-v1.md) · [架构](#架构) · [跑起来](#快速开始) · [安全](docs/security.md)
+[English](README.md) · [机制](docs/memory-core-v1.md) · [架构](#架构) · [跑起来](#快速开始) · [安全](docs/security.md) · [贡献指南](CONTRIBUTING.md)
 
 ---
 
@@ -54,6 +54,10 @@ Hippocampus 把"记忆"做成 agent 的核心能力，而不是外挂的检索�
 > **引用脚注（别省）**：作答输入＝记忆层 top-8 注入上下文，**不是全文**——与全文基线
 > 同表比必须带记录；官方判分要花 API 费用（预算硬停 ¥30 内置，每轮报告余额跑前/跑后）。
 > 完整数字、分类表、CI 方法、花费与复跑命令见 `docs/benchmark.md` 与 `docs/roadmap.md`。
+> **仓内可核对的部分**：[`results/lme_official_500b_by_type.json`](results/lme_official_500b_by_type.json)
+> ——官方判分全量批的按题型聚合（六类，含 knowledge-update 78 题子集）、Wilson 区间、源报告
+> sha256，以及与报告分类表的逐行对账；零模型调用纯派生。逐题明细（题干／gold／预测）**不入仓**，
+> 入仓的是审阅者能自己复核的聚合值。
 
 性能（真实运行库同规模合成库：1154 记忆／2406 实体／6035 关系／497 事件）：
 四通道检索 p50 **48 ms**；注入装配 p50 109 ms；单条写入 p50 **42 ms**（增量索引同步，
@@ -102,6 +106,17 @@ hippocampus bench locomo --data D:/tmp/hc-bench/locomo10.json --model-arm
 > 数字口径：10 题、7 问 3 动作、两次对照；**合成示例数据**，不是真实用户数据。
 > 换机复跑同法：`hippocampus seed && hippocampus demo --memories`。
 
+**下面两张是真跑出来的终端截图，不是画出来的**（离线档、零凭据、合成数据）。展示层只做了两件事：
+着色与长行软换行；**每张图里剔掉了哪些诊断行，都印在图里**（附对应的 `tail`／`grep`），
+你可以用同一条管道复跑，得到同一批行。重生成命令：`python scripts/gen_demo_screenshot.py`。
+
+![终端截图：hippocampus doctor / seed / 记忆开关对照评测（离线档）](docs/demo-offline-eval.png)
+
+`scripts/demo_flow.py`：同一条记忆跨会话被**三种形态**（记忆核心／Agent／代理）分别取到，
+A1–A4 断言端到端跑通（退出码 0）：
+
+![终端截图：跨会话三形态演示，A1–A4 断言全部通过](docs/demo-cross-session.png)
+
 代理形态：
 
 ```bash
@@ -121,6 +136,14 @@ hippocampus chat --offline "记住：我不看外包"   # 无 key／无网也能
 ```
 
 ## 架构
+
+![Hippocampus 架构总览：一个记忆核心、两种消费形态、双集合、三条正交状态轴、双轨＋观察轨](docs/architecture.svg)
+
+每个方框的右下角都写着它对应的代码锚点（`文件:行号`）。图是**生成出来的，不是画出来的**：
+`python scripts/gen_architecture_svg.py` 会在出图前逐条校验 33 条行级锚点 ＋ 5 条文件级锚点 ＋ 2 条否定式断言
+（`无物理删除记忆`、`无 namespace`）对得上源码，任何一条对不上就**拒绝生成**——图与代码脱节比没有图更糟。
+写入侧细节（三条正交状态轴、三条写入轨、冲突确认回路）另有一张：
+[`docs/memory-lifecycle.svg`](docs/memory-lifecycle.svg)。
 
 | 层 | 形态 | 入口 |
 |---|---|---|
@@ -157,7 +180,7 @@ export HIPPOCAMPUS_BASE_URL=https://api.deepseek.com   # 可选，也可写在 c
 ## 验证自己跑一遍
 
 ```bash
-python -m pytest tests/ -q            # 649 条（含模型臂 21 条；C 盘紧张时加 --basetemp=D:/tmp/pt）
+python -m pytest tests/ -q            # 678 条（含模型臂 21 条；C 盘紧张时加 --basetemp=D:/tmp/pt）
 python scripts/check_interface.py     # MemoryCore v1 契约（scope 第一参数／无 HTTP 字段／只追加）
 python scripts/audit_deps.py          # 依赖审计：全局单例残留必须为 0
 python scripts/scan_credentials.py    # 凭据扫描：零命中
@@ -166,7 +189,13 @@ python scripts/calibrate.py           # 阈值标定（打印分数分布与建�
 ```
 
 CI（GitHub Actions）跑的就是上面这一串，**全程无 key、无网**（离线档），
-Windows 与 Linux 双平台。
+Windows 与 Linux 双平台。`main` 已开分支保护，上面 CI 的六个检查是必需状态（不要求人工批准——
+单维护者项目）：
+`gh api repos/Chestnuts-Sisyphus/hippocampus/branches/main/protection`。
+
+**CD**：推 `v*` tag 会触发 [`.github/workflows/release.yml`](.github/workflows/release.yml)
+——构建 sdist/wheel → 用构建出的 wheel 在干净 venv 里装一遍并离线冒烟 → 产物挂到同名 Release。
+**PyPI 发布默认关闭**（属对外动作）；开启方式（trusted publishing，免 token）写在该 workflow 的注释里。
 
 ## 工程约定
 
@@ -191,6 +220,11 @@ Windows 与 Linux 双平台。
 | [docs/naming.md](docs/naming.md) | 命名决策（PyPI 分发名等） |
 | [docs/forms-parity.md](docs/forms-parity.md) | 两形态功能对齐表 |
 | [docs/verification-design.md](docs/verification-design.md) | 评测题验证方法 |
+| [results/lme_official_500b_by_type.json](results/lme_official_500b_by_type.json) | 官方判分全量批的仓内聚合件：逐题型准确率＋Wilson 区间＋源报告 sha256＋对账行（不含逐题明细） |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | 怎么跑测试/lint、提交规范、离线优先与隐私红线 |
+| [.github/SECURITY.md](.github/SECURITY.md) | 漏洞报告渠道（私密 advisory）、支持版本、**不算漏洞的设计边界** |
+| [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) | issue／PR 的行为基线 |
+| [CITATION.cff](CITATION.cff) | 引用元数据 |
 
 ## 目录结构
 

@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "Hippocampus"
+abstract: >-
+  以记忆为核心的 agent 运行时：一个记忆门面（MemoryCore）＋两种消费形态（OpenAI 兼容代理形态、
+  LangGraph 编排的 Agent 形态）。记忆以 SQLite 主库 ＋ Chroma 双集合（经验层 hippocampus_mem／
+  经历层 hippocampus_ep）存储，携带三条正交状态轴（status／lifecycle／shadow）与写入侧三轨
+  （确认轨／非确认轨／观察轨，模型输出永不静默注入）。公开基准（LongMemEval-oracle、
+  LoCoMo-10）用官方判分口径测量，具体数字与诚实脚注见 README 与 docs/benchmark.md——
+  引用数字时请连同脚注一起引用（作答输入是记忆层 top-8 注入上下文，不是全文）。
+type: software
+authors:
+  - name: "Chestnuts-Sisyphus"
+    website: "https://github.com/Chestnuts-Sisyphus"
+repository-code: "https://github.com/Chestnuts-Sisyphus/hippocampus"
+url: "https://github.com/Chestnuts-Sisyphus/hippocampus"
+license: MIT
+version: 0.5.0
+date-released: "2026-09-19"
+keywords:
+  - agent memory
+  - long-term memory
+  - cross-session memory
+  - retrieval
+  - langgraph
+  - llm

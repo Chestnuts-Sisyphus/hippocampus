@@ -9,7 +9,7 @@
 **Cross-session memory for agents — one memory core (`MemoryCore`), two consumption forms,
 measured on public benchmarks with official judging.**
 
-[中文说明](README.zh-CN.md) · [Mechanism](docs/memory-core-v1.md) · [Architecture](#-architecture) · [Running it](#-quick-start) · [Security](docs/security.md)
+[中文说明](README.zh-CN.md) · [Mechanism](docs/memory-core-v1.md) · [Architecture](#-architecture) · [Running it](#-quick-start) · [Security](docs/security.md) · [Contributing](CONTRIBUTING.md)
 
 ---
 
@@ -70,7 +70,12 @@ RSS **~1.1 GB** (was ~4 GB), evidence recall still 100%.
 > **Number source-of-truth (F2):** every figure above is kept in sync with the local results
 > document (a private working file, not part of this repository; latest re-measurement
 > 2026-09-18). If a number changes anywhere, update both places the same day — see
-> `docs/release-sync.md` for the exact sync checklist.
+> `docs/release-sync.md` for the exact sync checklist. The **in-repo checkable part** of the official
+> LongMemEval run is [`results/lme_official_500b_by_type.json`](results/lme_official_500b_by_type.json):
+> the per-question-type split (six types, including the 78-question knowledge-update subset), Wilson
+> CIs, the source report's sha256, and a row-by-row cross-check against the report — derived offline,
+> with no model calls. Per-question rows (questions / gold / predictions) are deliberately **not** in
+> the repo; the aggregate is what a reviewer can re-verify.
 
 Full numbers, category breakdowns, CI methods, costs, and repro commands:
 `docs/benchmark.md` + `docs/roadmap.md`.
@@ -107,6 +112,19 @@ Boundary: minimal evalset — 10 questions (7 QA / 3 actions), single endpoint, 
           reproducible method, no general claims of quality.
 ```
 
+**Real captures, not mock-ups.** Both images below are rendered straight from the commands shown in
+them (offline tier, zero credentials, synthetic data): the only display-side edits are colouring and
+soft-wrapping, and the filtering each image applied is printed inside the image itself, so you can
+re-run the same pipeline and get the same lines. Regenerate with
+`python scripts/gen_demo_screenshot.py`.
+
+![Terminal capture: hippocampus doctor, seed, and the memory-on/off demo in the offline tier](docs/demo-offline-eval.png)
+
+`scripts/demo_flow.py` — the same memory reaching a second session through **all three forms**
+(core / agent / proxy), asserted end to end (A1–A4, exit code 0):
+
+![Terminal capture: cross-session demo across the three forms, A1-A4 asserts passing](docs/demo-cross-session.png)
+
 Proxy form:
 
 ```bash
@@ -129,6 +147,16 @@ hippocampus chat --offline "记住：我不看外包"  # memory discipline works
 
 ## 🏗️ Architecture
 
+![Hippocampus architecture: one memory core, two consumption forms, dual collections, three orthogonal state axes, dual tracks plus an observation track](docs/architecture.svg)
+
+Every box carries the code anchor it stands for (`file:line`, in the box corner). The diagram is
+**generated, not drawn**: `python scripts/gen_architecture_svg.py` re-verifies all 33 line-level
+anchors, 5 file-level anchors, plus two absence assertions (`no physical delete of memories`, `no namespace`) against the
+source tree and **refuses to emit the SVG** if any of them moved — a diagram that drifts from the
+code is worse than no diagram. The write side (three orthogonal state axes, the three write tracks,
+and the conflict-confirmation loop) has its own figure:
+[`docs/memory-lifecycle.svg`](docs/memory-lifecycle.svg).
+
 | Layer | Form | Entry point |
 |---|---|---|
 | Memory core | `MemoryCore` (SQLite + Chroma + BM25, 4-channel retrieval) | `hippocampus.core` |
@@ -145,12 +173,22 @@ memory writes are safe-ident/safe-DDL checked, and offline mode means *no outbou
 
 ## 🧪 Tests & CI
 
-- **649 pytest tests** (3 xfailed) — memory core, both forms, guards, embedding tiers, public-bench
+- **678 pytest tests** (3 xfailed) — memory core, both forms, guards, embedding tiers, public-bench
   adapters, official judging arm; all offline-runnable (`pytest --basetemp=D:/tmp/pt`).
 - Demo eval runs in CI with **threshold assertions** (memory on ≥9/10, memory off ≤6/10) — score
   regressions turn the pipeline red.
 - Static checks: `check_interface` (v1 contract append-only), `audit_deps`, `scan_credentials`
   (zero credential literals across the tracked tree), `scan_personal_data`, `ruff`.
+- `main` is protected: the six CI checks (`full` over the OS × Python matrix, `core-only`, `lint`) are
+  **required**, with **no** required reviewer (single maintainer) —
+  `gh api repos/Chestnuts-Sisyphus/hippocampus/branches/main/protection`.
+- **CD**: pushing a `v*` tag runs [`.github/workflows/release.yml`](.github/workflows/release.yml) —
+  build sdist/wheel, install the built wheel into a clean venv and smoke-test it offline, attach the
+  artifacts to the GitHub Release. **PyPI publishing is deliberately off** (it is an outward-facing
+  action); the trusted-publishing switch is documented in that workflow's comments.
+- Contributing rules (offline-first, zero credential literals, no out-of-repo paths, numbers must be
+  reproducible): [`CONTRIBUTING.md`](CONTRIBUTING.md). Vulnerability reports:
+  [`.github/SECURITY.md`](.github/SECURITY.md).
 
 ---
 
@@ -171,6 +209,11 @@ memory writes are safe-ident/safe-DDL checked, and offline mode means *no outbou
 | [`docs/naming.md`](docs/naming.md) | Naming decisions (PyPI name, terminology) |
 | [`docs/forms-parity.md`](docs/forms-parity.md) | Feature parity across the two forms |
 | [`docs/verification-design.md`](docs/verification-design.md) | Verification methodology for eval topics |
+| [`results/lme_official_500b_by_type.json`](results/lme_official_500b_by_type.json) | In-repo aggregate of the official LongMemEval run: per-question-type accuracy + Wilson CI + source sha256 + cross-check rows (no per-question rows) |
+| [`CONTRIBUTING.md`](CONTRIBUTING.md) | How to run tests/lint, commit conventions, the offline-first and privacy rules |
+| [`.github/SECURITY.md`](.github/SECURITY.md) | How to report a vulnerability (private advisory), supported versions, design boundaries that are *not* vulnerabilities |
+| [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md) | Behaviour baseline for issues/PRs |
+| [`CITATION.cff`](CITATION.cff) | Citation metadata |
 
 ---
 

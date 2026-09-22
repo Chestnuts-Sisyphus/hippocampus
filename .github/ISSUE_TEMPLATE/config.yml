@@ -1,0 +1,11 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 🔐 安全漏洞（请走私密渠道）
+    url: https://github.com/Chestnuts-Sisyphus/hippocampus/security/advisories/new
+    about: 凭据泄漏、出站策略绕过、scope 目录穿越一类的问题，请用 GitHub 私密漏洞报告，不要开公开 issue。
+  - name: 📖 先读文档（很多"问题"其实是设计边界）
+    url: https://github.com/Chestnuts-Sisyphus/hippocampus/blob/main/docs/roadmap.md
+    about: 离线档能做什么、单机自用定位、记忆库单写者、无 MCP／第三方工具接入——都写在这里。
+  - name: 🧭 参与贡献（测试 / lint / 提交规范 / 隐私红线）
+    url: https://github.com/Chestnuts-Sisyphus/hippocampus/blob/main/CONTRIBUTING.md
+    about: 改代码前请过一遍：离线优先、零凭据字面量、不硬编码仓外路径、数字必须可复跑。
