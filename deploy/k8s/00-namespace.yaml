@@ -1,0 +1,9 @@
+# GF1·③：Hippocampus 单机有状态部署的最小 manifests 集。
+# 命名空间把本项目与同集群其他东西隔开（HPA/配额按命名空间算）。
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: hippocampus
+  labels:
+    app.kubernetes.io/name: hippocampus
+    app.kubernetes.io/part-of: hippocampus

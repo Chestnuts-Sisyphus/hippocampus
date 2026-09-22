@@ -1,0 +1,129 @@
+# 单副本 + Recreate：这两个字段是**有状态设计的结论**，不是保守默认值。
+#   - replicas: 1 —— SQLite 单写者 + RWO 卷，两个 Pod 同时挂同一块卷起不来（RWO 语义），
+#     就算卷能共享也会在记忆库写锁上互踩；扩容路线见 docs/containerization.md §三。
+#   - strategy: Recreate —— RollingUpdate 会同时存在新旧两个 Pod 抢卷，直接卡在
+#     ContainerCreating（RWO 冲突）。宁可有几秒不可用，也不要两个写者。
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hippocampus
+  namespace: hippocampus
+  labels:
+    app.kubernetes.io/name: hippocampus
+    app.kubernetes.io/component: memory-service
+spec:
+  replicas: 1
+  strategy:
+    type: Recreate
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hippocampus
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hippocampus
+    spec:
+      # 探针要读令牌文件，令牌只给 10001；容器其余能力全部丢掉（见下 securityContext）
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001         # 让挂进来的 PVC/Secret 文件对该组可读
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: hippocampus
+          image: hippocampus:0.5.0
+          imagePullPolicy: IfNotPresent
+          args: ["serve", "--host", "0.0.0.0", "--port", "8765", "--allow-remote"]
+          ports:
+            - name: http
+              containerPort: 8765
+          envFrom:
+            - configMapRef:
+                name: hippocampus-config
+          env:
+            # 模型凭据：走 Secret → env，**不落镜像、不写 manifest**（memory/config.py 只认环境变量名）
+            - name: DEEPSEEK_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: hippocampus-secrets
+                  key: DEEPSEEK_API_KEY
+                  optional: true      # 离线档跑得动；置 0 出站时缺了会在配置检查处报出来
+          volumeMounts:
+            - name: data
+              mountPath: /data
+            # 实例令牌以单文件挂进数据根：代码只在 <数据根>/instance_token 读它，
+            # subPath 让 Secret 的单个 key 落到该路径，而不是把整个卷盖掉。
+            - name: instance-token
+              mountPath: /data/instance_token
+              subPath: instance_token
+              readOnly: true
+            - name: tmp
+              mountPath: /tmp
+            # 根文件系统只读，但 chromadb/onnx 这类库会往缓存目录写模型与运行期缓存
+            # （默认档 builtin-hash 不下载模型，可缓存目录仍会被探测/创建）。给一个 emptyDir，
+            # 并把 XDG_CACHE_HOME／HF_HOME 一起指过去（见 ConfigMap），
+            # 这样既不放开根文件系统，也不依赖 HOME 可写。
+            - name: cache
+              mountPath: /opt/hc-cache
+          # 就绪/存活探针必须带令牌：绑非环回时 /health **同样要鉴权**（九轮 W1），
+          # 不带令牌的 httpGet 会一直 401 → Pod 永远不 Ready。用 python 读挂载的令牌文件发请求，
+          # 不依赖镜像里有 curl（slim 镜像没有）。
+          readinessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - |
+                  import pathlib, urllib.request
+                  token = pathlib.Path("/data/instance_token").read_text().strip()
+                  req = urllib.request.Request(
+                      "http://127.0.0.1:8765/health", headers={"Authorization": "Bearer " + token}
+                  )
+                  urllib.request.urlopen(req, timeout=3)
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 4
+            failureThreshold: 3
+          livenessProbe:
+            exec:
+              command:
+                - python
+                - -c
+                - |
+                  import pathlib, urllib.request
+                  token = pathlib.Path("/data/instance_token").read_text().strip()
+                  req = urllib.request.Request(
+                      "http://127.0.0.1:8765/health", headers={"Authorization": "Bearer " + token}
+                  )
+                  urllib.request.urlopen(req, timeout=3)
+            initialDelaySeconds: 20
+            periodSeconds: 30
+            timeoutSeconds: 5
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: "250m"
+              memory: "512Mi"
+            limits:
+              cpu: "1"
+              memory: "1Gi"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true    # 写面只有 /data（卷）与 /tmp（emptyDir）
+            capabilities:
+              drop: ["ALL"]
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: hippocampus-data
+        - name: instance-token
+          secret:
+            secretName: hippocampus-secrets
+            optional: true          # 空令牌时 Pod 会在启动闸拒起（退出码 2），不是裸奔
+            defaultMode: 0400
+        - name: tmp
+          emptyDir: {}
+        - name: cache
+          emptyDir: {}

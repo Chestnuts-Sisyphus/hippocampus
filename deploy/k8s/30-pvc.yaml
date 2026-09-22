@@ -1,0 +1,21 @@
+# 记忆是有状态的：一个数据根 = 一个 SQLite 主库（memory.db）+ 一个 Chroma 持久化目录
+# + 一个实例令牌文件。三者必须同生共死，所以放**同一块卷**。
+#
+# accessModes 为什么是 ReadWriteOnce：SQLite 是单写者库，卷给两个 Pod 同时读写只会
+# 换来 `database is locked` 与写者互踩（仓内既有裁决："同一记忆库只允许一个写者进程"）。
+# 多副本的正确路线见 docs/containerization.md §三（共享 RWX 卷 + 选主，或把状态外置）。
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: hippocampus-data
+  namespace: hippocampus
+  labels:
+    app.kubernetes.io/name: hippocampus
+spec:
+  accessModes:
+    - ReadWriteOnce
+  resources:
+    requests:
+      storage: 5Gi
+  # storageClassName 故意不写死：各集群默认类不同（本地 kind/minikube 与云上不一样），
+  # 留空即用集群默认 StorageClass；要钉住就显式填。

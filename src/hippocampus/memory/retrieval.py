@@ -15,6 +15,7 @@ Hippocampus 原型 —— v6 分层检索（任务书 2：检索侧核心重构�
 自己的质量线比较。事件层按线索（结构化证据）检索，不与经验层互相否决。
 """
 
+import contextlib
 import functools
 import hashlib
 import json
@@ -381,12 +382,33 @@ def clear_index_error() -> None:
 
 
 def _query_collection(collection, query: str, n: int, query_embedding=None):
-    """对集合发一次查询（两种入参形态共用一个出口，便于重试）。"""
-    if query_embedding is not None:
-        return collection.query(
-            query_embeddings=[list(query_embedding)], n_results=min(n, 1000), include=["distances", "metadatas"]
-        )
-    return collection.query(query_texts=[query], n_results=min(n, 1000), include=["distances", "metadatas"])
+    """对集合发一次查询（两种入参形态共用一个出口，便于重试）。
+
+    观测（GF1）：本函数是**向量查询唯一出口**，span 因此落在这里——一次检索查了几次、
+    每次取回几条、用的是外部算好的向量还是 chroma 自嵌，一眼可见（未开导出时即 no-op）。
+    """
+    from hippocampus.observability import get_tracer
+
+    with get_tracer().span(
+        "hippocampus.vector_query",
+        kind="CLIENT",
+        **{
+            "db.system": "chromadb",
+            "db.operation": "query",
+            "hippocampus.vector_query.n_requested": min(n, 1000),
+            "hippocampus.vector_query.used_query_embedding": query_embedding is not None,
+            "hippocampus.vector_query.collection": getattr(collection, "name", type(collection).__name__),
+        },
+    ) as span:
+        if query_embedding is not None:
+            res = collection.query(
+                query_embeddings=[list(query_embedding)], n_results=min(n, 1000), include=["distances", "metadatas"]
+            )
+        else:
+            res = collection.query(query_texts=[query], n_results=min(n, 1000), include=["distances", "metadatas"])
+        with contextlib.suppress(TypeError, IndexError, KeyError):
+            span.set_attribute("hippocampus.vector_query.n_returned", len(res["ids"][0]))
+        return res
 
 
 def _parse_semantic(res) -> dict:
@@ -706,11 +728,34 @@ def _query_embedding(query: str) -> list:
 
     P02 任务 1：onnx 类中文模型（bge）查询侧自动加官方检索指令前缀
     （embedding_models.ONNXEmbeddingFunction.query_instruction）；
-    文档侧（sync_index/upsert 走 __call__）不加——bge 官方用法，任务书拍板 4。"""
+    文档侧（sync_index/upsert 走 __call__）不加——bge 官方用法，任务书拍板 4。
+
+    观测（GF1）：span 带本次是否命中 LRU（`cache_info()` 前后差）与向量维度——
+    这是"检索延迟里有多少是嵌入推理"的唯一分界点（未开导出时即 no-op）。
+    """
+    from hippocampus.observability import get_tracer
+
     fn = _get_embed_fn()
     instr = getattr(fn, "query_instruction", "") or ""
     text = instr + query if instr else query
-    return list(_query_embedding_cached(text))
+    with get_tracer().span(
+        "hippocampus.embedding",
+        **{
+            "hippocampus.embedding.text_chars": len(text),
+            "hippocampus.embedding.has_query_instruction": bool(instr),
+        },
+    ) as span:
+        before = _query_embedding_cached.cache_info()
+        vec = list(_query_embedding_cached(text))
+        after = _query_embedding_cached.cache_info()
+        span.set_attributes(
+            **{
+                "hippocampus.embedding.cache_hit": after.hits > before.hits,
+                "hippocampus.embedding.lru_size": after.currsize,
+                "hippocampus.embedding.dim": len(vec),
+            }
+        )
+        return vec
 
 
 def semantic_search(collection, query: str, n: int = TOP_K * OVER_FETCH, query_embedding=None, repair=None) -> dict:

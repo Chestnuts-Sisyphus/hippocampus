@@ -1,0 +1,826 @@
+{
+  "resourceSpans": [
+    {
+      "resource": {
+        "attributes": [
+          {
+            "key": "service.name",
+            "value": {
+              "stringValue": "hippocampus"
+            }
+          },
+          {
+            "key": "telemetry.sdk.name",
+            "value": {
+              "stringValue": "hippocampus-observability"
+            }
+          }
+        ]
+      },
+      "scopeSpans": [
+        {
+          "scope": {
+            "name": "hippocampus.observability",
+            "version": "1"
+          },
+          "spans": [
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "5f3e3115b216793a",
+              "parentSpanId": "5387ab7ef81a23d3",
+              "name": "hippocampus.vector_query",
+              "kind": "CLIENT",
+              "startTimeUnixNano": "1790079674530115300",
+              "endTimeUnixNano": "1790079674531116100",
+              "attributes": [
+                {
+                  "key": "db.system",
+                  "value": {
+                    "stringValue": "chromadb"
+                  }
+                },
+                {
+                  "key": "db.operation",
+                  "value": {
+                    "stringValue": "query"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_requested",
+                  "value": {
+                    "intValue": "20"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.used_query_embedding",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.collection",
+                  "value": {
+                    "stringValue": "hippocampus_ep"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_returned",
+                  "value": {
+                    "intValue": "3"
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "e7fbeea0997d7d6f",
+              "parentSpanId": "5387ab7ef81a23d3",
+              "name": "hippocampus.vector_query",
+              "kind": "CLIENT",
+              "startTimeUnixNano": "1790079674533114400",
+              "endTimeUnixNano": "1790079674533114400",
+              "attributes": [
+                {
+                  "key": "db.system",
+                  "value": {
+                    "stringValue": "chromadb"
+                  }
+                },
+                {
+                  "key": "db.operation",
+                  "value": {
+                    "stringValue": "query"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_requested",
+                  "value": {
+                    "intValue": "40"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.used_query_embedding",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.collection",
+                  "value": {
+                    "stringValue": "hippocampus_mem"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_returned",
+                  "value": {
+                    "intValue": "3"
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "addeeab0529e73ae",
+              "parentSpanId": "5387ab7ef81a23d3",
+              "name": "hippocampus.vector_query",
+              "kind": "CLIENT",
+              "startTimeUnixNano": "1790079674533114400",
+              "endTimeUnixNano": "1790079674534115200",
+              "attributes": [
+                {
+                  "key": "db.system",
+                  "value": {
+                    "stringValue": "chromadb"
+                  }
+                },
+                {
+                  "key": "db.operation",
+                  "value": {
+                    "stringValue": "query"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_requested",
+                  "value": {
+                    "intValue": "40"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.used_query_embedding",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.collection",
+                  "value": {
+                    "stringValue": "hippocampus_ep"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_returned",
+                  "value": {
+                    "intValue": "3"
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "8cf7fd115b6d7ddd",
+              "parentSpanId": "5387ab7ef81a23d3",
+              "name": "hippocampus.embedding",
+              "kind": "INTERNAL",
+              "startTimeUnixNano": "1790079674534115200",
+              "endTimeUnixNano": "1790079674534115200",
+              "attributes": [
+                {
+                  "key": "hippocampus.embedding.text_chars",
+                  "value": {
+                    "intValue": "13"
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.has_query_instruction",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.cache_hit",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.lru_size",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.dim",
+                  "value": {
+                    "intValue": "384"
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "ffddac39a7dc9dac",
+              "parentSpanId": "5387ab7ef81a23d3",
+              "name": "hippocampus.vector_query",
+              "kind": "CLIENT",
+              "startTimeUnixNano": "1790079674534115200",
+              "endTimeUnixNano": "1790079674535114500",
+              "attributes": [
+                {
+                  "key": "db.system",
+                  "value": {
+                    "stringValue": "chromadb"
+                  }
+                },
+                {
+                  "key": "db.operation",
+                  "value": {
+                    "stringValue": "query"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_requested",
+                  "value": {
+                    "intValue": "32"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.used_query_embedding",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.collection",
+                  "value": {
+                    "stringValue": "hippocampus_mem"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_returned",
+                  "value": {
+                    "intValue": "3"
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "10c1ec314c18ef6d",
+              "parentSpanId": "5387ab7ef81a23d3",
+              "name": "hippocampus.vector_query",
+              "kind": "CLIENT",
+              "startTimeUnixNano": "1790079674535114500",
+              "endTimeUnixNano": "1790079674536115400",
+              "attributes": [
+                {
+                  "key": "db.system",
+                  "value": {
+                    "stringValue": "chromadb"
+                  }
+                },
+                {
+                  "key": "db.operation",
+                  "value": {
+                    "stringValue": "query"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_requested",
+                  "value": {
+                    "intValue": "200"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.used_query_embedding",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.collection",
+                  "value": {
+                    "stringValue": "hippocampus_ep"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_returned",
+                  "value": {
+                    "intValue": "3"
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "e325eb1230612b6d",
+              "parentSpanId": "5387ab7ef81a23d3",
+              "name": "hippocampus.embedding",
+              "kind": "INTERNAL",
+              "startTimeUnixNano": "1790079674538115300",
+              "endTimeUnixNano": "1790079674538115300",
+              "attributes": [
+                {
+                  "key": "hippocampus.embedding.text_chars",
+                  "value": {
+                    "intValue": "13"
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.has_query_instruction",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.cache_hit",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.lru_size",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.dim",
+                  "value": {
+                    "intValue": "384"
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "b4eb06b1bf30cc0d",
+              "parentSpanId": "5387ab7ef81a23d3",
+              "name": "hippocampus.vector_query",
+              "kind": "CLIENT",
+              "startTimeUnixNano": "1790079674538115300",
+              "endTimeUnixNano": "1790079674539115100",
+              "attributes": [
+                {
+                  "key": "db.system",
+                  "value": {
+                    "stringValue": "chromadb"
+                  }
+                },
+                {
+                  "key": "db.operation",
+                  "value": {
+                    "stringValue": "query"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_requested",
+                  "value": {
+                    "intValue": "32"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.used_query_embedding",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.collection",
+                  "value": {
+                    "stringValue": "hippocampus_mem"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_returned",
+                  "value": {
+                    "intValue": "3"
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "d1cf4238efd339a7",
+              "parentSpanId": "5387ab7ef81a23d3",
+              "name": "hippocampus.vector_query",
+              "kind": "CLIENT",
+              "startTimeUnixNano": "1790079674539115100",
+              "endTimeUnixNano": "1790079674540114900",
+              "attributes": [
+                {
+                  "key": "db.system",
+                  "value": {
+                    "stringValue": "chromadb"
+                  }
+                },
+                {
+                  "key": "db.operation",
+                  "value": {
+                    "stringValue": "query"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_requested",
+                  "value": {
+                    "intValue": "200"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.used_query_embedding",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.collection",
+                  "value": {
+                    "stringValue": "hippocampus_ep"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_returned",
+                  "value": {
+                    "intValue": "3"
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "123c1b510dbf8f8a",
+              "parentSpanId": "5387ab7ef81a23d3",
+              "name": "hippocampus.embedding",
+              "kind": "INTERNAL",
+              "startTimeUnixNano": "1790079674541115200",
+              "endTimeUnixNano": "1790079674542618700",
+              "attributes": [
+                {
+                  "key": "hippocampus.embedding.text_chars",
+                  "value": {
+                    "intValue": "22"
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.has_query_instruction",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.cache_hit",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.lru_size",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.dim",
+                  "value": {
+                    "intValue": "384"
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "0cd356396a3f6f5a",
+              "parentSpanId": "5387ab7ef81a23d3",
+              "name": "hippocampus.vector_query",
+              "kind": "CLIENT",
+              "startTimeUnixNano": "1790079674542618700",
+              "endTimeUnixNano": "1790079674542618700",
+              "attributes": [
+                {
+                  "key": "db.system",
+                  "value": {
+                    "stringValue": "chromadb"
+                  }
+                },
+                {
+                  "key": "db.operation",
+                  "value": {
+                    "stringValue": "query"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_requested",
+                  "value": {
+                    "intValue": "10"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.used_query_embedding",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.collection",
+                  "value": {
+                    "stringValue": "hippocampus_mem"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_returned",
+                  "value": {
+                    "intValue": "3"
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "5387ab7ef81a23d3",
+              "parentSpanId": "d8b8f60870bb545e",
+              "name": "hippocampus.injection",
+              "kind": "INTERNAL",
+              "startTimeUnixNano": "1790079674530115300",
+              "endTimeUnixNano": "1790079674544622200",
+              "attributes": [
+                {
+                  "key": "hippocampus.injection.flow",
+                  "value": {
+                    "stringValue": "user"
+                  }
+                },
+                {
+                  "key": "hippocampus.injection.has_body_text",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "hippocampus.injection.user_text_chars",
+                  "value": {
+                    "intValue": "13"
+                  }
+                },
+                {
+                  "key": "hippocampus.injection.stable_chars",
+                  "value": {
+                    "intValue": "82"
+                  }
+                },
+                {
+                  "key": "hippocampus.injection.fluid_chars",
+                  "value": {
+                    "intValue": "186"
+                  }
+                },
+                {
+                  "key": "hippocampus.injection.n_retrieved",
+                  "value": {
+                    "intValue": "2"
+                  }
+                },
+                {
+                  "key": "hippocampus.injection.layered",
+                  "value": {
+                    "boolValue": true
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "cd41ebfc255094ca",
+              "parentSpanId": "d8b8f60870bb545e",
+              "name": "hippocampus.embedding",
+              "kind": "INTERNAL",
+              "startTimeUnixNano": "1790079674545622800",
+              "endTimeUnixNano": "1790079674545622800",
+              "attributes": [
+                {
+                  "key": "hippocampus.embedding.text_chars",
+                  "value": {
+                    "intValue": "13"
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.has_query_instruction",
+                  "value": {
+                    "boolValue": false
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.cache_hit",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.lru_size",
+                  "value": {
+                    "intValue": "3"
+                  }
+                },
+                {
+                  "key": "hippocampus.embedding.dim",
+                  "value": {
+                    "intValue": "384"
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "15b07ae2baaa3a72",
+              "parentSpanId": "d8b8f60870bb545e",
+              "name": "hippocampus.vector_query",
+              "kind": "CLIENT",
+              "startTimeUnixNano": "1790079674545622800",
+              "endTimeUnixNano": "1790079674546623600",
+              "attributes": [
+                {
+                  "key": "db.system",
+                  "value": {
+                    "stringValue": "chromadb"
+                  }
+                },
+                {
+                  "key": "db.operation",
+                  "value": {
+                    "stringValue": "query"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_requested",
+                  "value": {
+                    "intValue": "32"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.used_query_embedding",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.collection",
+                  "value": {
+                    "stringValue": "hippocampus_mem"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_returned",
+                  "value": {
+                    "intValue": "3"
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "7ff2a26f2f04b994",
+              "parentSpanId": "d8b8f60870bb545e",
+              "name": "hippocampus.vector_query",
+              "kind": "CLIENT",
+              "startTimeUnixNano": "1790079674547622600",
+              "endTimeUnixNano": "1790079674547622600",
+              "attributes": [
+                {
+                  "key": "db.system",
+                  "value": {
+                    "stringValue": "chromadb"
+                  }
+                },
+                {
+                  "key": "db.operation",
+                  "value": {
+                    "stringValue": "query"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_requested",
+                  "value": {
+                    "intValue": "200"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.used_query_embedding",
+                  "value": {
+                    "boolValue": true
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.collection",
+                  "value": {
+                    "stringValue": "hippocampus_ep"
+                  }
+                },
+                {
+                  "key": "hippocampus.vector_query.n_returned",
+                  "value": {
+                    "intValue": "3"
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            },
+            {
+              "traceId": "8dfbca81b633ca1ef7c467d88f589f29",
+              "spanId": "d8b8f60870bb545e",
+              "parentSpanId": "",
+              "name": "hippocampus.retrieval_request",
+              "kind": "INTERNAL",
+              "startTimeUnixNano": "1790079674530115300",
+              "endTimeUnixNano": "1790079674548622500",
+              "attributes": [
+                {
+                  "key": "hippocampus.account",
+                  "value": {
+                    "stringValue": "trace-gf1"
+                  }
+                },
+                {
+                  "key": "hippocampus.session",
+                  "value": {
+                    "stringValue": "chat-1"
+                  }
+                },
+                {
+                  "key": "hippocampus.flow",
+                  "value": {
+                    "stringValue": "user"
+                  }
+                },
+                {
+                  "key": "hippocampus.query_chars",
+                  "value": {
+                    "intValue": "13"
+                  }
+                },
+                {
+                  "key": "hippocampus.injection.items",
+                  "value": {
+                    "intValue": "1"
+                  }
+                },
+                {
+                  "key": "hippocampus.injection.stable_chars",
+                  "value": {
+                    "intValue": "82"
+                  }
+                },
+                {
+                  "key": "hippocampus.injection.fluid_chars",
+                  "value": {
+                    "intValue": "186"
+                  }
+                },
+                {
+                  "key": "hippocampus.injection.enabled",
+                  "value": {
+                    "boolValue": true
+                  }
+                }
+              ],
+              "status": {
+                "code": 0
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

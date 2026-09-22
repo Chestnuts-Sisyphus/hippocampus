@@ -1,0 +1,53 @@
+# 构建上下文过滤（GF1·③）：镜像里不该有的东西一律在进入 builder 之前就切掉。
+#
+# 一句话判据：**凡带用户数据、凭据、历史产物、环境相关文件的，都不进构建上下文**——
+# 不是因为它们会被 COPY（Dockerfile 里没有通配 COPY），而是因为构建上下文会被送到
+# docker daemon，历史层里可能留痕（`docker history`／构建缓存的经典泄露面）。
+
+# ---- 凭据与私密（最高优先级）----
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*token*
+!src/hippocampus/**/token*.py
+config.json
+
+# ---- 运行时数据根（记忆库/向量库/令牌都在这里面）----
+data/
+.hippocampus/
+accounts/
+*.db
+*.sqlite
+*.sqlite3
+chroma/
+
+# ---- 环境与工具链 ----
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+build/
+dist/
+*.egg-info/
+
+# ---- 仓内非运行时资产（测试/文档/证据产物不必进镜像）----
+.git/
+.gitignore
+.github/
+tests/
+docs/
+results/
+deploy/
+.qoder/
+scripts/
+*.md
+!README.md
+
+# ---- 本机评测产物（仓外正本的镜像，体积大且含逐题明文）----
+D:/
+tmp/

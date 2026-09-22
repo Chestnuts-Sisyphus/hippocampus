@@ -1,0 +1,92 @@
+{
+  "generated_from": {
+    "report_model": "deepseek-chat",
+    "report_n": 500,
+    "report_calls": {
+      "answer": 500,
+      "judge": 500
+    },
+    "report_tokens": {
+      "prompt": 399373,
+      "completion": 38184
+    },
+    "report_cost_est_yuan": 1.1042,
+    "real_spend_yuan": 0.0,
+    "level": "[已证明] provider 返回的 usage 累加，可对账"
+  },
+  "counter": "tiktoken:o200k_base（代理分词器，非 deepseek 官方 tokenizer）",
+  "rows_joined_by_qid": 500,
+  "n_metric_rows": 500,
+  "split": {
+    "k_prompt": 1.0179,
+    "k_completion": 1.0149,
+    "note": "真值总量按本地重建文本的占比线性拆到各段；{date} 槽缺失使作答输入段偏小",
+    "level": "[归纳待证]"
+  },
+  "per_request_production": {
+    "input_tokens": 578.63,
+    "output_tokens": 75.35,
+    "injection_input_tokens": 524.87,
+    "injection_share_of_input": 0.9071,
+    "level": "[归纳待证]"
+  },
+  "per_request_judge": {
+    "input_tokens": 220.12,
+    "output_tokens": 1.01,
+    "note": "判分臂只在评测批次出现，不进生产请求成本",
+    "level": "[归纳待证]"
+  },
+  "price": {
+    "source_url": "https://api-docs.deepseek.com/zh-cn/quick_start/pricing",
+    "note": "deepseek-flash 高峰价（cache miss 输入 ¥2/M、输出 ¥8/M）；空闲时段为半价（¥1/M、¥4/M）；cache hit 输入 ¥0.04/M（空闲 ¥0.02/M）。取最贵口径＝宁高不低，与 model_arm.PRICE_* 一致。",
+    "input_cny_per_m": 2.0,
+    "output_cny_per_m": 8.0,
+    "cache_hit_input_cny_per_m": 0.04,
+    "checked_on": "2026-09-22",
+    "level": "[已证明] 现价页面逐档核对；model_arm.PRICE_* 与之取同一（最贵）档"
+  },
+  "cost": {
+    "cny_per_request": 0.00176008,
+    "cny_per_1000_requests": 1.7601,
+    "cny_per_1000_injection_only": 1.0497,
+    "assumptions": {
+      "dau": 1000,
+      "requests_per_user_per_day": 10,
+      "days": 30
+    },
+    "monthly_requests": 300000,
+    "cny_per_month": 528.02,
+    "level": "[已证明] 单价×token；[假设] DAU 与每用户请求数为参数"
+  },
+  "cache_scenarios": [
+    {
+      "stable_tokens": 200,
+      "no_cache_cny_per_request": 0.0004,
+      "cached_cny_per_request": 8e-06,
+      "saving_cny_per_1k": 0.392,
+      "saving_cny_per_month": 117.6,
+      "level": "[假设] 稳定层 token 数为场景参数，未实测"
+    },
+    {
+      "stable_tokens": 500,
+      "no_cache_cny_per_request": 0.001,
+      "cached_cny_per_request": 2e-05,
+      "saving_cny_per_1k": 0.98,
+      "saving_cny_per_month": 294.0,
+      "level": "[假设] 稳定层 token 数为场景参数，未实测"
+    },
+    {
+      "stable_tokens": 1000,
+      "no_cache_cny_per_request": 0.002,
+      "cached_cny_per_request": 4e-05,
+      "saving_cny_per_1k": 1.96,
+      "saving_cny_per_month": 588.0,
+      "level": "[假设] 稳定层 token 数为场景参数，未实测"
+    }
+  ],
+  "caveats": [
+    "拆分为线性比例法：真值总量是 provider 实测，段间占比来自本地重建（代理分词器）。",
+    "作答 prompt 的 {date} 槽（question_date）不在报告里，按空串渲染 → 作答输入段偏小十几个字符。",
+    "deepseek-chat 在 2026-09-22 的现价页上已不单列（页面现列 deepseek-flash／deepseek-v4-pro），批次当时用的是 deepseek-chat；本表按现价页的 flash 档计价，若模型映射变化需重算。"
+  ]
+}

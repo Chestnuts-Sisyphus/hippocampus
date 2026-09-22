@@ -1,0 +1,20 @@
+# 服务暴露：ClusterIP（集群内访问）。
+# 不建 LoadBalancer/NodePort 的理由：非环回绑定要求实例令牌，而把"能写记忆的管理口"
+# 直接甩到公网是最容易被面试官追问的安全面；要对外就再加一层 Ingress +
+# 网络策略/鉴权网关，并把 HIPPOCAMPUS_OFFLINE 保持为 1（不出站）。
+apiVersion: v1
+kind: Service
+metadata:
+  name: hippocampus
+  namespace: hippocampus
+  labels:
+    app.kubernetes.io/name: hippocampus
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: hippocampus
+  ports:
+    - name: http
+      port: 8765
+      targetPort: http
+      protocol: TCP

@@ -1,0 +1,24 @@
+# 非敏感配置。**不放任何密钥**（密钥只走 Secret；详见 secret.example.yaml 的头注）。
+# 对应代码里的读取面：数据根走环境变量 HIPPOCAMPUS_HOME（memory/runtime.py），
+# 离线开关走 HIPPOCAMPUS_OFFLINE（memory/config.py）。
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: hippocampus-config
+  namespace: hippocampus
+  labels:
+    app.kubernetes.io/name: hippocampus
+data:
+  # 数据根：记忆库 memory.db + 向量索引 chroma/ + 实例令牌 instance_token 都在这里 → 必须挂卷
+  HIPPOCAMPUS_HOME: "/data"
+  # 默认离线：进程不出站。要真调模型由部署方置 "0" 并注入下面的 Secret 密钥。
+  HIPPOCAMPUS_OFFLINE: "1"
+  # 会话缓存上限（内存有界；多账户长跑用，见 docs/roadmap.md A2/T5）
+  HIPPOCAMPUS_SESSION_CACHE_MAX: "16"
+  # 模型名（仅在 HIPPOCAMPUS_OFFLINE=0 时生效）
+  HIPPOCAMPUS_MODEL: "deepseek-chat"
+  # 缓存目录：容器根文件系统只读，HOME 也不保证可写，所以显式把缓存指到挂进来的 emptyDir
+  # （Deployment 里把同名 emptyDir 挂在 /opt/hc-cache）。XDG_CACHE_HOME 管大多数 Python 库，
+  # HF_HOME 管 HuggingFace 系（onnx 档下载模型时用）。
+  XDG_CACHE_HOME: "/opt/hc-cache"
+  HF_HOME: "/opt/hc-cache"

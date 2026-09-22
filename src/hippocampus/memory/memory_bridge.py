@@ -830,6 +830,42 @@ def prepare_injection(
 ) -> tuple[str, str, list[dict[str, Any]]]:
     """检索记忆并构造两层注入文本。返回 (稳定层文本, 流动层文本, 过滤后的检索结果)。
 
+    观测（GF1）：本函数是**注入侧唯一出口**，span 在这里记两层文本长度与命中数。
+    原实现原样搬进 `_prepare_injection_inner`，本函数只多一层记账——行为零变更
+    （未开 trace 导出时 span 是共享 no-op 对象）。
+    """
+    from hippocampus.observability import get_tracer
+
+    with get_tracer().span(
+        "hippocampus.injection",
+        **{
+            "hippocampus.injection.flow": flow,
+            "hippocampus.injection.has_body_text": bool(body_text),
+            "hippocampus.injection.user_text_chars": len(user_text or ""),
+        },
+    ) as span:
+        stable_text, fluid_text, results = _prepare_injection_inner(
+            session, user_text, flow=flow, body_text=body_text, run_id=run_id
+        )
+        span.set_attributes(
+            **{
+                "hippocampus.injection.stable_chars": len(stable_text),
+                "hippocampus.injection.fluid_chars": len(fluid_text),
+                # 注意口径：这里是**检索返回的条数**（本层出口），不是最终注入条数——
+                # 上层 inject_finalize 还会做定序/限额/逐条装载，可能再减几条。
+                # 最终注入条数记在根 span 的 `hippocampus.injection.items`（core.py）。
+                "hippocampus.injection.n_retrieved": len(results),
+                "hippocampus.injection.layered": bool(stable_text or fluid_text),
+            }
+        )
+        return stable_text, fluid_text, results
+
+
+def _prepare_injection_inner(
+    session: MemorySession, user_text: str, flow: str = "user", body_text: str = "", run_id: str = ""
+) -> tuple[str, str, list[dict[str, Any]]]:
+    """`prepare_injection` 的原实现（检索＋分层组装）；外部调用一律走公开入口。
+
     流程（v6 第五节 + 拍板 1-7）：
       N3 重述警报（注入前检测，软失败，alarm 暂存待拼）-- 不动
       -> stable_layer（身份声明 + 主题层，拍板 3）

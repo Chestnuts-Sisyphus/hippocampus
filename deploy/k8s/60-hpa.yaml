@@ -1,0 +1,35 @@
+# HPA：**故意钉成 min=max=1**——这是本项目的正确值，不是没调完的参数。
+#
+# 为什么不能靠加副本扛流量：记忆是**有状态**的。一个数据根 = 一个 SQLite 主库 +
+# 一个 Chroma 目录 + 与卷绑定的实例令牌；两个 Pod 抢一块 RWO 卷起不来，共享一块 RWX 卷
+# 也会在 SQLite 单写者与库内写锁上互踩（docs/containerization.md §三 的两条扩容路线：
+# ① 共享 RWX 卷 + 选主（只有一个写者，其余做只读检索）；② 把状态外置成服务型向量库/数据库）。
+# 两条路都没实现 → 在本仓当前形态下，**把 maxReplicas 抬到 2 只会制造双写者**。
+#
+# 什么时候改这个文件：路线 ①/② 任一落地并跑过并发一致性测试之后，再把 maxReplicas 抬上去。
+# 保守起见仍给 CPU 指标：即使 max=1，HPA 也会记录指标并把"该扩了但被有状态约束挡住"
+# 这件事暴露在 `kubectl describe hpa` 上（比静默不扩更好排查）。
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: hippocampus
+  namespace: hippocampus
+  labels:
+    app.kubernetes.io/name: hippocampus
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: hippocampus
+  minReplicas: 1
+  maxReplicas: 1
+  metrics:
+    - type: Resource
+      resource:
+        name: cpu
+        target:
+          type: Utilization
+          averageUtilization: 70
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300

@@ -719,7 +719,44 @@ class MemoryCore:
         `seen_text`：本轮**模型已经看到的内容全文**（调用方自己给的一整段文本，不是
         传输层概念）。命中的记忆若已出现在其中，则不重复注入（防"重复注入已见内容"）。
         `limit`：覆盖注入条数上限（默认读活跃参数）。
+
+        观测（GF1）：**"一次检索"的根 span 在这里开**——本方法是检索的公开入口，
+        由它开根意味着"一次 inject_finalize ＝ 一条 trace"，不依赖调用方自觉给根
+        （代理形态、Agent 形态、评测批跑都直接调本方法）。原实现原样搬进
+        `_inject_finalize_inner`，行为零变更；未开 trace 导出时 span 是共享 no-op 对象。
         """
+        from hippocampus.observability import get_tracer
+
+        with get_tracer().span(
+            "hippocampus.retrieval_request",
+            **{
+                "hippocampus.account": getattr(scope, "account", ""),
+                "hippocampus.session": getattr(scope, "session", ""),
+                "hippocampus.flow": flow,
+                "hippocampus.query_chars": len(query or ""),
+            },
+        ) as span:
+            injection = self._inject_finalize_inner(scope, query, flow=flow, seen_text=seen_text, limit=limit)
+            span.set_attributes(
+                **{
+                    "hippocampus.injection.items": len(injection.items),
+                    "hippocampus.injection.stable_chars": len(injection.stable_text or ""),
+                    "hippocampus.injection.fluid_chars": len(injection.fluid_text or ""),
+                    "hippocampus.injection.enabled": bool(injection.enabled),
+                }
+            )
+            return injection
+
+    def _inject_finalize_inner(
+        self,
+        scope: Scope,
+        query: str,
+        *,
+        flow: str = "user",
+        seen_text: str = "",
+        limit: int | None = None,
+    ) -> Injection:
+        """`inject_finalize` 的原实现（装配注入文本）；外部调用一律走公开入口。"""
         scope = _as_scope(scope)
         session = self._session(scope)
         injection = Injection(flow=flow, run_id=_new_run_id())
