@@ -37,7 +37,7 @@
   <rect x="150" y="306" width="1040" height="96" rx="10" fill="#fbfdff" stroke="#cbd5e1" stroke-width="1.2"/>
   <rect x="150" y="306" width="4" height="96" rx="2" fill="#b45309"/>
   <text x="166" y="330" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="13" fill="#b45309" text-anchor="start" font-weight="700">确认轨</text>
-  <text x="166" y="372" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="start">memory/memory_bridge.py:1065</text>
+  <text x="166" y="372" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="start">memory/memory_bridge.py:1101</text>
   <rect x="300" y="328" width="210" height="52" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.0"/>
   <text x="405" y="351" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="middle">用户消息</text>
   <text x="405" y="366" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="middle">preference／fact</text>
@@ -56,7 +56,7 @@
   <rect x="150" y="414" width="1040" height="96" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/>
   <rect x="150" y="414" width="4" height="96" rx="2" fill="#047857"/>
   <text x="166" y="438" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="13" fill="#047857" text-anchor="start" font-weight="700">非确认轨</text>
-  <text x="166" y="480" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="start">memory/memory_bridge.py:1014</text>
+  <text x="166" y="480" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="start">memory/memory_bridge.py:1050</text>
   <rect x="300" y="436" width="210" height="52" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.0"/>
   <text x="405" y="459" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="middle">用户消息</text>
   <text x="405" y="474" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="middle">status／resource</text>
@@ -75,7 +75,7 @@
   <rect x="150" y="522" width="1040" height="96" rx="10" fill="#fbfdff" stroke="#cbd5e1" stroke-width="1.2"/>
   <rect x="150" y="522" width="4" height="96" rx="2" fill="#be123c"/>
   <text x="166" y="546" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="13" fill="#be123c" text-anchor="start" font-weight="700">观察轨</text>
-  <text x="166" y="588" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="start">core/core.py:843</text>
+  <text x="166" y="588" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="start">core/core.py:880</text>
   <rect x="300" y="544" width="210" height="52" rx="8" fill="#ffffff" stroke="#e2e8f0" stroke-width="1.0"/>
   <text x="405" y="567" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="middle">模型回复</text>
   <text x="405" y="582" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="middle">resource／status</text>

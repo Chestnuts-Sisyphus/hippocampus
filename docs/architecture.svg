@@ -68,7 +68,7 @@
   <text x="162" y="472" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11.5" fill="#334155" text-anchor="start">冲突机械检测 → 挂起为 candidate</text>
   <text x="162" y="488" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11.5" fill="#334155" text-anchor="start">确认块随回复回传，等用户裁决</text>
   <text x="162" y="504" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11.5" fill="#334155" text-anchor="start">裁决前旧值继续生效</text>
-  <text x="474" y="541" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="end">memory/memory_bridge.py:1065</text>
+  <text x="474" y="541" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="end">memory/memory_bridge.py:1101</text>
   <line x1="318" y1="550" x2="318" y2="572" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
   <rect x="502" y="418" width="336" height="132" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/>
   <rect x="502" y="418" width="4" height="132" rx="2" fill="#047857"/>
@@ -77,7 +77,7 @@
   <text x="514" y="472" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11.5" fill="#334155" text-anchor="start">响应后自动落库，不建确认块</text>
   <text x="514" y="488" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11.5" fill="#334155" text-anchor="start">与确认轨共享 episode，防重复</text>
   <text x="514" y="504" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11.5" fill="#334155" text-anchor="start">并发执行、各自持锁</text>
-  <text x="826" y="541" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="end">memory/memory_bridge.py:1014</text>
+  <text x="826" y="541" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="end">memory/memory_bridge.py:1050</text>
   <line x1="670" y1="550" x2="670" y2="572" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
   <rect x="854" y="418" width="336" height="132" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/>
   <rect x="854" y="418" width="4" height="132" rx="2" fill="#be123c"/>
@@ -86,7 +86,7 @@
   <text x="866" y="472" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11.5" fill="#334155" text-anchor="start">入库即 shadow=1（观察期）</text>
   <text x="866" y="488" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11.5" fill="#334155" text-anchor="start">幻觉资源直接丢弃、留痕</text>
   <text x="866" y="504" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11.5" fill="#334155" text-anchor="start">晋升到正式只能由人工触发</text>
-  <text x="1178" y="541" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="end">core/core.py:843</text>
+  <text x="1178" y="541" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="end">core/core.py:880</text>
   <line x1="1022" y1="550" x2="1022" y2="572" stroke="#94a3b8" stroke-width="1.4" marker-end="url(#arrow)"/>
   <rect x="40" y="576" width="96" height="22" rx="11" fill="#eef2ff" stroke="#c7d2fe" stroke-width="1.0"/>
   <text x="88" y="592" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="12" fill="#1d4ed8" text-anchor="middle" font-weight="700">⑤ 存储</text>
@@ -105,7 +105,7 @@
   <text x="698" y="630" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11.5" fill="#334155" text-anchor="start">hippocampus_ep  = 经历层（episodes）</text>
   <text x="698" y="646" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11.5" fill="#334155" text-anchor="start">metadata：hnsw:space = cosine</text>
   <text x="698" y="662" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11.5" fill="#334155" text-anchor="start">缺 chromadb 时：语义通道降级关闭，BM25／图／事件照常</text>
-  <text x="1178" y="695" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="end">memory/retrieval.py:47 · memory/retrieval.py:48 · memory/config.py:49</text>
+  <text x="1178" y="695" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="end">memory/retrieval.py:48 · memory/retrieval.py:49 · memory/config.py:49</text>
   <rect x="150" y="716" width="336" height="54" rx="10" fill="#fffbeb" stroke="#cbd5e1" stroke-width="1.2"/>
   <rect x="150" y="716" width="4" height="54" rx="2" fill="#b45309"/>
   <text x="162" y="738" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="12.5" fill="#b45309" text-anchor="start" font-weight="700">状态轴 · status</text>
@@ -126,19 +126,19 @@
   <rect x="150" y="800" width="420" height="118" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/>
   <rect x="150" y="800" width="4" height="118" rx="2" fill="#1d4ed8"/>
   <text x="162" y="821" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="12.5" fill="#1d4ed8" text-anchor="start" font-weight="700">四通道检索（各自打分，禁跨通道比分数）</text>
-  <text x="162" y="838" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="start">语义：向量库余弦 — memory/retrieval.py:716（默认 384 维词法哈希）</text>
-  <text x="162" y="854" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="start">关键词：自建 BM25 倒排 — memory/retrieval.py:900（库指纹失效重建）</text>
-  <text x="162" y="870" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="start">图谱：实体邻接扩展 — memory/retrieval.py:926</text>
-  <text x="162" y="886" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="start">事件线索：episode 召回 — memory/retrieval.py:1156（相关性断崖截断）</text>
+  <text x="162" y="838" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="start">语义：向量库余弦 — memory/retrieval.py:761（默认 384 维词法哈希）</text>
+  <text x="162" y="854" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="start">关键词：自建 BM25 倒排 — memory/retrieval.py:944（库指纹失效重建）</text>
+  <text x="162" y="870" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="start">图谱：实体邻接扩展 — memory/retrieval.py:971</text>
+  <text x="162" y="886" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="start">事件线索：episode 召回 — memory/retrieval.py:1201（相关性断崖截断）</text>
   <text x="558" y="909" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="end">memory/retrieval.py:10</text>
   <line x1="570" y1="859" x2="602" y2="859" stroke="#334155" stroke-width="1.4" marker-end="url(#arrow)"/>
   <rect x="606" y="800" width="268" height="118" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/>
   <rect x="606" y="800" width="4" height="118" rx="2" fill="#047857"/>
   <text x="618" y="821" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="12.5" fill="#047857" text-anchor="start" font-weight="700">融合与预算装填</text>
-  <text x="618" y="838" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="start">fuse：区块顺序 语义→BM25→图→事件</text>
+  <text x="618" y="838" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="start">区块管线：顺序 语义→BM25→图→事件</text>
   <text x="618" y="854" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="start">token 预算裁剪（超限砍尾，不破顺序）</text>
   <text x="618" y="870" font-family="Segoe UI, PingFang SC, Microsoft YaHei, Noto Sans CJK SC, Helvetica Neue, Arial, sans-serif" font-size="11" fill="#334155" text-anchor="start">跨通道分数只做同通道比较</text>
-  <text x="862" y="909" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="end">memory/retrieval.py:1016</text>
+  <text x="862" y="909" font-family="Consolas, SFMono-Regular, Menlo, DejaVu Sans Mono, Courier New, monospace" font-size="10.5" fill="#64748b" text-anchor="end">memory/retrieval.py:1125</text>
   <line x1="874" y1="859" x2="906" y2="859" stroke="#334155" stroke-width="1.4" marker-end="url(#arrow)"/>
   <rect x="910" y="800" width="280" height="118" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.2"/>
   <rect x="910" y="800" width="4" height="118" rx="2" fill="#6d28d9"/>

@@ -41,10 +41,10 @@ ANCHORS: dict[str, tuple[str, int, str]] = {
     "source": ("src/hippocampus/core/types.py", 17, "Source"),
     "inject_asm": ("src/hippocampus/core/core.py", 717, "stable"),
     # 写入侧三轨
-    "tracks_note": ("src/hippocampus/core/core.py", 840, "fire_track_a"),
-    "track_a": ("src/hippocampus/memory/memory_bridge.py", 1065, "def fire_track_a"),
-    "track_b": ("src/hippocampus/memory/memory_bridge.py", 1014, "def after_response"),
-    "obs_note": ("src/hippocampus/core/core.py", 843, "shadow=1"),
+    "tracks_note": ("src/hippocampus/core/core.py", 877, "fire_track_a"),
+    "track_a": ("src/hippocampus/memory/memory_bridge.py", 1101, "def fire_track_a"),
+    "track_b": ("src/hippocampus/memory/memory_bridge.py", 1050, "def after_response"),
+    "obs_note": ("src/hippocampus/core/core.py", 880, "shadow=1"),
     # 存储
     "db": ("src/hippocampus/memory/database.py", 42, "CREATE TABLE IF NOT EXISTS memories"),
     "rel_types": ("src/hippocampus/memory/database.py", 86, "SUPERSEDES"),
@@ -57,17 +57,20 @@ ANCHORS: dict[str, tuple[str, int, str]] = {
     "confirm_usage": ("src/hippocampus/memory/confirm.py", 34, "否决"),
     "confirm_block": ("src/hippocampus/memory/confirm.py", 44, "def build_confirm_block"),
     "conflict_rule": ("src/hippocampus/memory/conflict.py", 171, "def detect_rule_conflicts"),
-    "col_mem": ("src/hippocampus/memory/retrieval.py", 47, "hippocampus_mem"),
-    "col_ep": ("src/hippocampus/memory/retrieval.py", 48, "hippocampus_ep"),
+    "col_mem": ("src/hippocampus/memory/retrieval.py", 48, "hippocampus_mem"),
+    "col_ep": ("src/hippocampus/memory/retrieval.py", 49, "hippocampus_ep"),
     "embed": ("src/hippocampus/memory/builtin_embedding.py", 25, "DIM"),
     "cfg": ("src/hippocampus/memory/config.py", 49, "builtin-hash"),
     # 检索与融合
-    "fuse": ("src/hippocampus/memory/retrieval.py", 1016, "def fuse"),
+    # ⚠️ 指向**真管线**：`fuse` 自称 DEPRECATED、仅供 console debugRetrieve 展示，
+    #    主流程排序已由 retrieve 内的区块管线取代（`_apply_budget` 按区块顺序装填）。
+    #    拿 fuse 当融合实现讲会被追问即穿（见 docs/memory-pipeline.md 的同一更正）。
+    "fuse": ("src/hippocampus/memory/retrieval.py", 1125, "def _apply_budget"),
     "order": ("src/hippocampus/memory/retrieval.py", 10, "禁跨通道比分数"),
-    "semantic": ("src/hippocampus/memory/retrieval.py", 716, "def semantic_search"),
-    "episode": ("src/hippocampus/memory/retrieval.py", 1156, "def episode_clue_search"),
-    "lexical": ("src/hippocampus/memory/retrieval.py", 900, "BM25"),
-    "graph_search": ("src/hippocampus/memory/retrieval.py", 926, "def graph_search"),
+    "semantic": ("src/hippocampus/memory/retrieval.py", 761, "def semantic_search"),
+    "episode": ("src/hippocampus/memory/retrieval.py", 1201, "def episode_clue_search"),
+    "lexical": ("src/hippocampus/memory/retrieval.py", 944, "def bm25_search"),
+    "graph_search": ("src/hippocampus/memory/retrieval.py", 971, "def graph_search"),
     # 双形态入口
     "proxy_chat": ("src/hippocampus/proxy/app.py", 378, "/v1/chat/completions"),
     "proxy_resp": ("src/hippocampus/proxy/app.py", 383, "/v1/responses"),
@@ -442,7 +445,7 @@ def build_architecture() -> tuple[str, list[str]]:
     s.card(
         L + 456, y, 268, 118, "融合与预算装填",
         [
-            "fuse：区块顺序 语义→BM25→图→事件",
+            "区块管线：顺序 语义→BM25→图→事件",
             "token 预算裁剪（超限砍尾，不破顺序）",
             "跨通道分数只做同通道比较",
         ],
