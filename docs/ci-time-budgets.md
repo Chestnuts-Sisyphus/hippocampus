@@ -89,6 +89,7 @@ gh run view 35425865217 -R Chestnuts-Sisyphus/hippocampus --log-failed   # 本�
 | `scripts/live_proxy_smoke.py` | 0.2（就绪轮询间隔）／2（单探针请求超时）／15（`/health`、`/v1/models`、子进程收尾兜底）／60（三向入站请求超时）／120（起 CLI 子进程收集）／300（起服务死线 `STARTUP_DEADLINE_S`） |
 | `scripts/live_supersede_probe.py` | 运行时参数：`time.sleep(args.settle)` 的秒数由 `--settle` 决定（默认 0.8 秒，测量口径参数；改动会换测量条件，故不动；`--selfcheck` 归零） |
 | `scripts/scan_public_leak.py` | 60（取 tracked 清单）／120（读 git log 与 `gh release view`）——纯防挂 |
+| `scripts/gen_demo_screenshot.py` | 180（无窗口 Edge 截图子进程兜底；正常 2–5 秒）／900（真跑 demo 子进程兜底：含 10 题评测与三形态演示，慢机留足余量，不属断言链）——两者都只是防挂，不表达"应该多快" |
 
 ## 三、机器闸（九轮 W9）：台账不再靠人手抄
 

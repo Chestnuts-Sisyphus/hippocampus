@@ -20,6 +20,10 @@ runs/
 eval-out/
 demo-*.json
 
+# 就地备份（改文档前留的原件，只增不删但不必公开）
+-backups/
+*.bak
+
 # Python
 __pycache__/
 *.py[cod]

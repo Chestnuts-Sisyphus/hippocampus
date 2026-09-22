@@ -25,12 +25,15 @@ CI_EXEMPT: dict[str, str] = {
     "bench_judge_audit.py": "读仓外官方判分 JSON（付费产物不入仓）；复跑口径 benchmark.md §二·三",
     "bench_judge_cross.py": "同上：跨批复判可行性检查，输入是仓外两份 500 题报告",
     "bench_judge_subset.py": "十轮 X14 派生切片器，输入是仓外 lme_official_500b.json；命令写进 benchmark.en.md 注释",
+    "bench_judge_by_type.py": "GB4 零花费派生（按 question_type 分组＋Wilson CI），输入同上仓外报告；"
+                              "聚合摘要入仓在 results/，复跑口径 benchmark.md §二·三",
     "bench_error_attribution.py": "官方分错误归因（T11），输入为仓外付费批次报告",
     # —— 重批次（全量评测/下载大模型，非 CI 时间预算档）——
     "bench_ab.py": "A/B 全量对照批次，需仓外数据集 JSON＋神经档下载，本机复跑（benchmark.md §二）",
     "bench_ablation.py": "批 B 全量复测（k=8/k=20），同上属重批次",
     "bench_diag.py": "失败归因需既有 A/B 数据根（--home 复用导入），本机复跑（benchmark.md §二·二b）",
-    "bench_head_to_head.py": "同批 home 对照（需既有导入根＋数据集），本机复跑件",
+    "bench_head_to_head.py": "实验脚手架（三个竞品全是本仓 mock、从未真跑、无结论），不接 CI；"
+                             "横比口径见 benchmark.md §二·十",
     "bench_scale.py": "规模档延迟台账件（roadmap §七），跑一遍超 CI 预算；小样本哨兵已由 ablation_channels 承担",
     "calibrate.py": "标定重档（神经档要下载＋sha256 校验）；CI 只保标定表的静态闸 test_n48，量参数属换档事件非常态",
     # —— 显式声明"不进 CI"的一次性真机件 ——
@@ -39,6 +42,16 @@ CI_EXEMPT: dict[str, str] = {
     "vendor_memory_modules.py": "一次性 vendoring 工具（T2 已完成），无回归价值",
     "vendor_proxy_modules.py": "同上",
     "vendor_tests.py": "同上（随迁测试已在 tests/ported/）",
+    # —— 对外包装生成件（GD1）：产物 SVG／PNG 已入仓，重生成属"改图事件"而非每次 push 的常态 ——
+    "gen_architecture_svg.py": "架构图生成器：出图前逐条校验 33 条行级锚点＋5 条文件级锚点＋2 条否定式断言（对不上拒绝生成）；"
+                               "产物 docs/architecture.svg／docs/memory-lifecycle.svg 已入仓，改图时本地跑",
+    "gen_demo_screenshot.py": "demo 截图生成器：真跑 demo_flow／doctor／seed／demo 后经无窗口 Edge 渲染 PNG；"
+                              "产物 docs/demo-*.png 已入仓，重生成属改素材事件",
+    # —— GF1 工程实证（十轮）：产物已入仓，重跑属"改证据事件" ——
+    "trace_retrieval.py": "结构化 trace 生成器：真跑一次检索并落 OTLP/JSON（产物 results/trace_retrieval_otlp.json 已入仓）；"
+                          "行为由静态闸 tests/test_n54_r10_gf1_trace_spans.py 守，重生成属改证据事件",
+    "bench_cost_model.py": "成本表派生器：输入是仓外官方判分批报告（付费产物不入仓），零花费只读派生；"
+                           "产物 results/cost_retrieval_injection.json 已入仓，复跑口径见 docs/observability-cost.md",
 }
 
 
